@@ -1,9 +1,9 @@
 // Macro Log: a personal food/macro tracker. Static site, no server.
 // Data lives in localStorage and (optionally) syncs to a private GitHub repo.
 
-import { GENERIC_FOODS } from "./foods.js?v=8";
-import { computeGame, questsFor, autoJunk, isJunkName, XP, lpForLevel, levelFromXP, weekRecap, mondayOf } from "./game.js?v=8";
-import { emblemSVG, rankFor, TIERS, firstLevelOfTier } from "./ranks.js?v=8";
+import { GENERIC_FOODS } from "./foods.js?v=9";
+import { computeGame, questsFor, autoJunk, isJunkName, XP, lpForLevel, levelFromXP, weekRecap, mondayOf } from "./game.js?v=9";
+import { emblemSVG, rankFor, TIERS, firstLevelOfTier } from "./ranks.js?v=9";
 
 const BARCODE_PONYFILL_URL = "https://cdn.jsdelivr.net/npm/barcode-detector@3.2.3/ponyfill/+esm";
 
@@ -510,6 +510,7 @@ function obSlides() {
        <div class="ob-step${isStandalone() ? " done" : ""}"><span class="ob-num">${isStandalone() ? "✓" : "1"}</span><div><b>Add to Home Screen</b><p class="muted small">In Safari tap <b>Share</b> (square with ↑) → <b>Add to Home Screen</b>. It opens like an app and Safari won't clear your data.</p></div></div>
        <div class="ob-step${syncConfigured() ? " done" : ""}"><span class="ob-num">${syncConfigured() ? "✓" : "2"}</span><div><b>Turn on sync</b><p class="muted small">Backs your log up to your private GitHub repo and syncs phone ↔ computer.</p>${syncConfigured() ? "" : `<button class="btn" data-ob="sync">Set up sync</button>`}</div></div>
      </div>
+     <a class="btn full" href="reminder.ics">Add a 21:00 streak reminder to my calendar</a>
      <div class="ob-bonus"><b>First-day bonus</b><span>Log breakfast, lunch and dinner today: <b class="good-text">+${XP.firstDay} LP</b> on top.</span></div>`,
   ];
 }

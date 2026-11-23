@@ -2,7 +2,7 @@
 // Everything is DERIVED from the log (entries + weigh-ins), so it stays consistent
 // across devices and updates if you edit past days.
 
-import { rankFor } from "./ranks.js?v=8";
+import { rankFor } from "./ranks.js?v=9";
 
 export const MAIN_MEALS = ["breakfast", "lunch", "dinner"];
 

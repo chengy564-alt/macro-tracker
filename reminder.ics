@@ -1,0 +1,23 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Macro Log//Streak reminder//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:macro-log-streak-check-2100@chengy564-alt.github.io
+DTSTAMP:20261123T120000Z
+DTSTART:20261123T210000
+DTEND:20261123T211000
+RRULE:FREQ=DAILY
+SUMMARY:Streak check: log today's food
+DESCRIPTION:Log anything you've eaten today before midnight to keep your streak and LP.\nhttps://chengy564-alt.github.io/macro-tracker/
+URL:https://chengy564-alt.github.io/macro-tracker/
+TRANSP:TRANSPARENT
+CLASS:PRIVATE
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:Streak check: log today's food
+TRIGGER:PT0M
+END:VALARM
+END:VEVENT
+END:VCALENDAR
