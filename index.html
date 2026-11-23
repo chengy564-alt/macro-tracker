@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Macro Log</title>
+  <meta name="theme-color" content="#0f1115">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Macros">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <button class="icon-btn" id="prevDay" aria-label="Previous day">‹</button>
+    <button class="date-btn" id="dateLabel">Today</button>
+    <button class="icon-btn" id="nextDay" aria-label="Next day">›</button>
+    <span class="spacer"></span>
+    <span class="sync-dot" id="syncDot" title="Sync status"></span>
+    <button class="icon-btn" id="openHistory" aria-label="History">▤</button>
+    <button class="icon-btn" id="openSettings" aria-label="Settings">⚙</button>
+  </header>
+
+  <main id="main">
+    <section class="card summary" id="summary"></section>
+    <div id="meals"></div>
+  </main>
+
+  <button class="fab" id="fab" aria-label="Add food">＋</button>
+  <div class="toast" id="toast" role="status"></div>
+
+  <!-- Add food -->
+  <dialog id="addSheet" class="sheet">
+    <div class="sheet-head">
+      <span>Add to</span>
+      <select id="addMeal" class="meal-select"></select>
+      <span class="spacer"></span>
+      <button class="icon-btn" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="quick-actions">
+      <button class="qa" id="qaScan"><span>▥</span>Scan barcode</button>
+      <button class="qa" id="qaPhoto"><span>◉</span>Photo / AI</button>
+      <button class="qa" id="qaManual"><span>✎</span>New food</button>
+    </div>
+    <input id="foodSearch" class="search" type="search" placeholder="Search my foods &amp; basics…" autocomplete="off">
+    <div id="searchResults" class="list"></div>
+    <button class="btn ghost full" id="offSearchBtn">Search packaged foods online</button>
+  </dialog>
+
+  <!-- Amount -->
+  <dialog id="amountSheet" class="sheet">
+    <div class="sheet-head">
+      <div class="grow">
+        <div class="title" id="amtName"></div>
+        <div class="muted small" id="amtSub"></div>
+      </div>
+      <button class="icon-btn" data-close aria-label="Close">✕</button>
+    </div>
+    <label class="field">
+      <span>Amount (g or ml)</span>
+      <input id="amtGrams" type="number" inputmode="decimal" min="0" step="any">
+    </label>
+    <div class="chips" id="amtChips"></div>
+    <div class="macro-preview" id="amtPreview"></div>
+    <label class="field">
+      <span>Meal</span>
+      <select id="amtMeal"></select>
+    </label>
+    <label class="field" id="amtDateWrap">
+      <span>Date</span>
+      <input id="amtDate" type="date">
+    </label>
+    <div class="row">
+      <button class="btn danger" id="amtDelete" hidden>Delete</button>
+      <button class="btn ghost" id="amtEditFood">Edit food</button>
+      <span class="spacer"></span>
+      <button class="btn primary" id="amtSave">Add</button>
+    </div>
+  </dialog>
+
+  <!-- Food editor -->
+  <dialog id="foodSheet" class="sheet">
+    <div class="sheet-head">
+      <div class="title grow" id="foodTitle">New food</div>
+      <button class="icon-btn" data-close aria-label="Close">✕</button>
+    </div>
+    <button class="btn ghost full" id="foodFromPhoto">◉ Fill from a photo of the label (AI)</button>
+    <label class="field"><span>Name</span><input id="fName" autocomplete="off"></label>
+    <div class="grid2">
+      <label class="field"><span>Brand</span><input id="fBrand" autocomplete="off"></label>
+      <label class="field"><span>Barcode</span><input id="fBarcode" inputmode="numeric" autocomplete="off"></label>
+    </div>
+    <div class="seg" id="fBasis">
+      <button data-basis="100" class="on">Per 100 g</button>
+      <button data-basis="serving">Per serving</button>
+    </div>
+    <div class="grid2">
+      <label class="field"><span>Serving name</span><input id="fServLabel" placeholder="e.g. 1 bar"></label>
+      <label class="field"><span>Serving size (g)</span><input id="fServGrams" type="number" inputmode="decimal" step="any"></label>
+    </div>
+    <div class="grid3">
+      <label class="field"><span>Calories</span><input id="fKcal" type="number" inputmode="decimal" step="any"></label>
+      <label class="field"><span>Protein g</span><input id="fP" type="number" inputmode="decimal" step="any"></label>
+      <label class="field"><span>Carbs g</span><input id="fC" type="number" inputmode="decimal" step="any"></label>
+      <label class="field"><span>Fat g</span><input id="fF" type="number" inputmode="decimal" step="any"></label>
+      <label class="field"><span>Sodium mg</span><input id="fNa" type="number" inputmode="decimal" step="any"></label>
+    </div>
+    <div class="row">
+      <button class="btn danger" id="foodDelete" hidden>Delete food</button>
+      <span class="spacer"></span>
+      <button class="btn primary" id="foodSave">Save &amp; continue</button>
+    </div>
+  </dialog>
+
+  <!-- Barcode scanner -->
+  <dialog id="scanSheet" class="sheet">
+    <div class="sheet-head">
+      <div class="title grow">Scan barcode</div>
+      <button class="icon-btn" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="video-wrap">
+      <video id="scanVideo" playsinline muted autoplay></video>
+      <div class="scan-frame"></div>
+    </div>
+    <div class="muted small center" id="scanStatus">Starting camera…</div>
+    <div class="row">
+      <input id="scanManual" class="grow" inputmode="numeric" placeholder="…or type the barcode number" autocomplete="off">
+      <button class="btn" id="scanLookup">Look up</button>
+    </div>
+    <div id="scanNotFound" hidden class="notice">
+      <p>Not in the database. Add it once and it's saved for next time:</p>
+      <div class="row">
+        <button class="btn primary" id="nfPhoto">Photo of label (AI)</button>
+        <button class="btn" id="nfManual">Type it in</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- AI photo -->
+  <dialog id="aiSheet" class="sheet">
+    <div class="sheet-head">
+      <div class="title grow">Photo / AI estimate</div>
+      <button class="icon-btn" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="seg" id="aiMode">
+      <button data-mode="meal" class="on">Meal / plate</button>
+      <button data-mode="label">Nutrition label</button>
+    </div>
+    <label class="photo-pick" id="aiPick">
+      <input id="aiFile" type="file" accept="image/*" hidden>
+      <img id="aiPreview" alt="" hidden>
+      <span id="aiPickText">Tap to take or choose a photo<br><span class="muted small">(optional for meals: you can just describe it)</span></span>
+    </label>
+    <label class="field" id="aiNoteWrap">
+      <span>What's in it? Give weights/counts you know</span>
+      <textarea id="aiNote" rows="3" placeholder="e.g. 180g cooked rice, 2 chicken thighs, 3 tenderstem broccoli, some furikake"></textarea>
+    </label>
+    <button class="btn primary full" id="aiGo">Analyze</button>
+    <div id="aiStatus" class="muted small center"></div>
+    <div id="aiResults"></div>
+  </dialog>
+
+  <!-- Online search -->
+  <dialog id="offSheet" class="sheet">
+    <div class="sheet-head">
+      <div class="title grow">Packaged foods (Open Food Facts)</div>
+      <button class="icon-btn" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="row">
+      <input id="offQuery" class="grow search" type="search" placeholder="e.g. fairlife protein shake">
+      <button class="btn" id="offGo">Search</button>
+    </div>
+    <div id="offResults" class="list"></div>
+  </dialog>
+
+  <!-- History -->
+  <dialog id="historySheet" class="sheet">
+    <div class="sheet-head">
+      <div class="title grow">Last 14 days</div>
+      <button class="icon-btn" data-close aria-label="Close">✕</button>
+    </div>
+    <div id="historyBody"></div>
+  </dialog>
+
+  <!-- Settings -->
+  <dialog id="settingsSheet" class="sheet">
+    <div class="sheet-head">
+      <div class="title grow">Settings</div>
+      <button class="icon-btn" data-close aria-label="Close">✕</button>
+    </div>
+    <h3>Daily targets</h3>
+    <div class="grid3">
+      <label class="field"><span>Calories</span><input id="tKcal" type="number" inputmode="decimal"></label>
+      <label class="field"><span>Protein g</span><input id="tP" type="number" inputmode="decimal"></label>
+      <label class="field"><span>Carbs g</span><input id="tC" type="number" inputmode="decimal"></label>
+      <label class="field"><span>Fat g</span><input id="tF" type="number" inputmode="decimal"></label>
+      <label class="field"><span>Sodium mg</span><input id="tNa" type="number" inputmode="decimal"></label>
+    </div>
+
+    <h3>Sync between phone &amp; computer (GitHub)</h3>
+    <p class="muted small">Your log is saved as <code>data.json</code> in a <b>private</b> GitHub repo. Enter the same details on each device. The token stays on this device only.</p>
+    <div class="grid2">
+      <label class="field"><span>GitHub username</span><input id="sOwner" autocomplete="off" autocapitalize="off"></label>
+      <label class="field"><span>Private data repo</span><input id="sRepo" autocomplete="off" autocapitalize="off" placeholder="macro-data"></label>
+    </div>
+    <label class="field"><span>Access token (fine-grained, Contents: read &amp; write on that repo only)</span><input id="sToken" type="password" autocomplete="off"></label>
+    <div class="row">
+      <span class="muted small grow" id="syncInfo"></span>
+      <button class="btn" id="syncNowBtn">Sync now</button>
+    </div>
+
+    <h3>AI photo estimates (Claude)</h3>
+    <p class="muted small">Needs an Anthropic API key from platform.claude.com (pay-as-you-go, roughly 1–3¢ per photo). Stored on this device only.</p>
+    <label class="field"><span>Anthropic API key</span><input id="sAiKey" type="password" autocomplete="off"></label>
+
+    <h3>Backup</h3>
+    <div class="row">
+      <button class="btn" id="exportBtn">Export JSON</button>
+      <label class="btn">Import JSON<input type="file" id="importFile" accept="application/json" hidden></label>
+    </div>
+
+    <div class="row end">
+      <button class="btn primary" id="settingsSave">Save</button>
+    </div>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
