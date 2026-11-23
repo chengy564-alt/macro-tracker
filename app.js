@@ -1,9 +1,9 @@
 // Macro Log: a personal food/macro tracker. Static site, no server.
 // Data lives in localStorage and (optionally) syncs to a private GitHub repo.
 
-import { GENERIC_FOODS } from "./foods.js?v=7";
-import { computeGame, questsFor, autoJunk, isJunkName, XP, lpForLevel, levelFromXP, weekRecap, mondayOf } from "./game.js?v=7";
-import { emblemSVG, rankFor, TIERS, firstLevelOfTier } from "./ranks.js?v=7";
+import { GENERIC_FOODS } from "./foods.js?v=8";
+import { computeGame, questsFor, autoJunk, isJunkName, XP, lpForLevel, levelFromXP, weekRecap, mondayOf } from "./game.js?v=8";
+import { emblemSVG, rankFor, TIERS, firstLevelOfTier } from "./ranks.js?v=8";
 
 const BARCODE_PONYFILL_URL = "https://cdn.jsdelivr.net/npm/barcode-detector@3.2.3/ponyfill/+esm";
 
@@ -265,6 +265,9 @@ function fastingHtml() {
 }
 setInterval(() => { const r = $("#fastRow"); if (r) r.outerHTML = fastingHtml(); }, 60000);
 
+// Logged after noon the next day → shown, but earns no LP (see game.js).
+function isLate(e) { const [y, m, d] = e.date.split("-").map(Number); return e.createdAt > new Date(y, m - 1, d + 1, 12).getTime(); }
+
 // How the day's calories are split across meals (for per-meal budgets).
 const MEAL_SPLIT = { breakfast: 0.25, lunch: 0.35, dinner: 0.3, snacks: 0.1 };
 const MEAL_ICON = {
@@ -327,11 +330,11 @@ function render() {
           <span class="meal-kcal num${mealOver ? " danger-text" : ""}"><b>${r0(st.kcal)}</b><span class="muted"> / ${budget}</span></span>
         </div>
         <div class="meal-bar">${segs.map(([k, v]) => `<i style="width:${kc(v)}%;background:var(--${k})"></i>`).join("")}</div>
-        ${!es.length && key !== "snacks" && aim > 0 ? `<div class="aim">Aim for <b>~${aim}g protein</b> here to hit ${t.p}g</div>` : ""}
+        ${!es.length && key !== "snacks" && aim > 0 && key === (emptyMains.includes(nowMeal) ? nowMeal : emptyMains[0]) ? `<div class="aim">Aim for <b>~${aim}g protein</b> here to hit ${t.p}g</div>` : ""}
         ${es.map((e) => `<div class="food${e.junk ? " junk" : ""}" data-entry="${e.id}">
             <span class="avatar">${esc((e.name.match(/[A-Za-z0-9]/) || ["•"])[0].toUpperCase())}</span>
             <div class="grow"><div class="name">${esc(e.name)}${e.junk ? ' <span class="pill bad">junk</span>' : ""}</div>
-            <div class="sub num">${r0(e.grams)}g · <span style="color:var(--p)">P ${r0(e.n.p)}</span> · C ${r0(e.n.c)} · F ${r0(e.n.f)}${e.estimated ? " · est." : ""}</div></div>
+            <div class="sub num">${r0(e.grams)}g · <span style="color:var(--p)">P ${r0(e.n.p)}</span> · C ${r0(e.n.c)} · F ${r0(e.n.f)}${e.estimated ? " · est." : ""}${isLate(e) ? " · <span class=\"late\">late · no LP</span>" : ""}</div></div>
             <div class="kcal num">${r0(e.n.kcal)}</div></div>`).join("")}
         ${es.length
           ? `<div class="meal-actions"><button class="add-more" data-add="${key}">+ Add to ${label.toLowerCase()}</button><button class="link-btn" data-save-meal="${key}">Save as meal</button></div>`
@@ -366,6 +369,7 @@ function renderGame() {
       <div class="streak${game.streak ? " on" : ""}">
         <svg viewBox="0 0 24 24" class="flame"><path d="M12 2c1 3.5 4.5 5.6 4.5 10a4.5 4.5 0 0 1-9 0c0-2 .8-3.3 1.8-4.5.2 1.7 1 2.7 2.2 3.2C11 8 11 5 12 2z"/></svg>
         <b>${game.streak}</b><span class="muted small">streak</span>
+        <span class="freeze${game.freezes ? "" : " none"}" title="Streak freezes: a missed day uses one instead of breaking your streak">❄ ${game.freezes}</span>
       </div>
     </div>
     ${weekStrip(today)}`;
@@ -376,7 +380,11 @@ function renderGame() {
   const td = game.today || { meals: 0, tot: { kcal: 0, p: 0 }, junk: 0, logged: false, xp: 0 };
   if (curDate === today) {
     const y = game.yesterday;
-    if (y && !y.logged && y.date >= game.firstDay && !td.logged)
+    if (y && !y.logged && y.date >= game.firstDay && h < 12)
+      banners.push(["warn", `Yesterday is empty. Log it before <b>12:00</b> to repair it${y.frozen ? " and keep your streak freeze" : " and save your streak"}. <button class=\"banner-btn\" data-action=\"yesterday\">Log yesterday</button>`]);
+    else if (y && y.frozen && !td.logged)
+      banners.push(["info", `❄ A streak freeze saved your ${game.streak}-day streak yesterday. ${game.freezes} left. Earn more with every 7-day streak.`]);
+    else if (y && !y.logged && y.date >= game.firstDay && !td.logged)
       banners.push(["bad", `Nothing logged yesterday: <b>${XP.missed} LP</b> and your streak reset. Log breakfast to start a new one.`]);
     else if (y && y.closed && y.xp < 0 && !td.logged)
       banners.push(["bad", `Yesterday cost you <b>${y.xp} LP</b>. Today's the comeback: ${XP.protein + XP.calOnTarget + XP.meal * 3}+ LP on the table.`]);
@@ -387,7 +395,9 @@ function renderGame() {
     else if (h >= 20 && td.logged && td.tot.p < T.p * 0.85)
       banners.push(["warn", `${r0(T.p - td.tot.p)}g protein to go. A shake or some chicken gets you the +${XP.protein} LP.`]);
   }
+  banners.unshift(...safetyBanners());
   $("#banners").innerHTML = banners.map(([k, t]) => `<div class="banner ${k}">${t}</div>`).join("");
+  celebrateIfNeeded(T);
 
   renderQuestMenu(td, T);
 
@@ -406,6 +416,134 @@ function renderGame() {
   checkProgressEvents();
 }
 
+// ---------- instant rewards: +LP pop and quest celebrations ----------
+let celebrate = false; // set right before a render that follows something you did
+let lastSnap = null;
+function celebrateIfNeeded(T) {
+  const qs = questsFor(game, T);
+  const done = new Set(qs.filter((q) => q.done).map((q) => q.label));
+  const snap = { total: game.totalXP, todayXp: game.today?.xp || 0, done };
+  if (celebrate && lastSnap) {
+    const delta = snap.todayXp - lastSnap.todayXp;
+    const fresh = qs.filter((q) => q.done && !lastSnap.done.has(q.label));
+    if (fresh.length) fresh.forEach((q, i) => setTimeout(() => lpPop(`+${q.xp} LP`, `Quest complete · ${q.label}`, true), i * 900));
+    else if (delta > 0) lpPop(`+${delta} LP`, "Logged");
+    if (delta > 0) {
+      const bar = $(".lpbar");
+      bar?.classList.remove("pulse"); void bar?.offsetWidth; bar?.classList.add("pulse");
+    }
+  }
+  celebrate = false;
+  lastSnap = snap;
+}
+function lpPop(big, small, quest = false) {
+  // Wait for any badge/rank pop-up to be dismissed so they never overlap.
+  setTimeout(() => {
+    const a = $("#alertSheet");
+    if (a.open) a.addEventListener("close", () => setTimeout(() => showLpPop(big, small, quest), 350), { once: true });
+    else showLpPop(big, small, quest);
+  }, 60);
+}
+function showLpPop(big, small, quest) {
+  const el = document.createElement("div");
+  el.className = `lp-pop${quest ? " quest" : ""}`;
+  el.innerHTML = `<b>${esc(big)}</b><span>${esc(small)}</span>`;
+  document.body.appendChild(el);
+  setTimeout(() => el.classList.add("out"), quest ? 2200 : 1400);
+  setTimeout(() => el.remove(), quest ? 2700 : 1900);
+}
+
+// ---------- safety banners: sync + Home Screen ----------
+const isStandalone = () => navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent);
+const HS_DISMISS_KEY = "mt-hs-dismissed";
+function safetyBanners() {
+  const out = [];
+  if (!syncConfigured()) {
+    out.push(["warn", `Your progress only lives on this device. If the browser clears it, your rank and streak are gone. <button class="banner-btn" data-action="settings">Turn on sync</button>`]);
+  } else if ($("#syncDot").classList.contains("err")) {
+    out.push(["bad", `Sync is failing: ${esc(lastSyncMsg)} <button class="banner-btn" data-action="settings">Fix</button>`]);
+  }
+  let dismissed = 0;
+  try { dismissed = +localStorage.getItem(HS_DISMISS_KEY) || 0; } catch {}
+  if (isIOS() && !isStandalone() && Date.now() - dismissed > 7 * 864e5) {
+    out.push(["info", `Add this to your Home Screen: it opens like an app and Safari won't wipe your data. <button class="banner-btn" data-action="howto">How</button><button class="banner-x" data-action="hs-dismiss" aria-label="Dismiss">✕</button>`]);
+  }
+  return out;
+}
+$("#banners").addEventListener("click", (e) => {
+  const a = e.target.closest("[data-action]")?.dataset.action;
+  if (!a) return;
+  if (a === "settings") openSettings();
+  if (a === "yesterday") { curDate = addDays(localDate(), -1); render(); window.scrollTo({ top: 0, behavior: "smooth" }); toast("Viewing yesterday: log what you ate"); }
+  if (a === "howto") openOnboarding(2);
+  if (a === "hs-dismiss") { try { localStorage.setItem(HS_DISMISS_KEY, String(Date.now())); } catch {} render(); }
+});
+
+// ---------- onboarding (first open) ----------
+const ONBOARD_KEY = "mt-onboarded-v1";
+let obStep = 0;
+function obSlides() {
+  const T = db.settings.targets;
+  return [
+    `<div class="ob-hero">${[0, 3, 6, 9].map((t) => emblemSVG(t, 64)).join("")}</div>
+     <div class="ob-kicker">Welcome</div>
+     <h2 class="ob-title">Your cut is now a ranked ladder</h2>
+     <p class="ob-text">Log what you eat, earn <b>LP</b>, and climb from <b>Iron IV</b> to <b>Challenger</b>. Slack off and you get <b>demoted</b>.</p>
+     <p class="ob-text muted">Target: ${T.kcal.toLocaleString()} kcal · ${T.p}g protein a day. Change it any time in Settings.</p>`,
+    `<div class="ob-kicker">How LP works</div>
+     <h2 class="ob-title">Earn it. Lose it.</h2>
+     <div class="ob-rules">
+       <div><span>Log a main meal</span><b class="good-text">+${XP.meal}</b></div>
+       <div><span>Hit ${T.p}g protein</span><b class="good-text">+${XP.protein}</b></div>
+       <div><span>Land your calories</span><b class="good-text">+${XP.calOnTarget}</b></div>
+       <div><span>Perfect day</span><b class="good-text">+${XP.perfect}</b></div>
+       <div><span>Streak bonus</span><b class="good-text">up to +70%</b></div>
+       <div><span>Junk food</span><b class="danger-text">${XP.junk}</b></div>
+       <div><span>Blow your calories</span><b class="danger-text">${XP.overBig}</b></div>
+       <div><span>Skip a day</span><b class="danger-text">${XP.missed}</b></div>
+     </div>
+     <p class="ob-text muted">❄ Streak freezes protect you from one missed day. You start with 1 and earn one per 7-day streak. Food logged after noon the next day earns no LP.</p>`,
+    `<div class="ob-kicker">Don't lose your progress</div>
+     <h2 class="ob-title">Two quick things</h2>
+     <div class="ob-steps">
+       <div class="ob-step${isStandalone() ? " done" : ""}"><span class="ob-num">${isStandalone() ? "✓" : "1"}</span><div><b>Add to Home Screen</b><p class="muted small">In Safari tap <b>Share</b> (square with ↑) → <b>Add to Home Screen</b>. It opens like an app and Safari won't clear your data.</p></div></div>
+       <div class="ob-step${syncConfigured() ? " done" : ""}"><span class="ob-num">${syncConfigured() ? "✓" : "2"}</span><div><b>Turn on sync</b><p class="muted small">Backs your log up to your private GitHub repo and syncs phone ↔ computer.</p>${syncConfigured() ? "" : `<button class="btn" data-ob="sync">Set up sync</button>`}</div></div>
+     </div>
+     <div class="ob-bonus"><b>First-day bonus</b><span>Log breakfast, lunch and dinner today: <b class="good-text">+${XP.firstDay} LP</b> on top.</span></div>`,
+  ];
+}
+function renderOnboarding() {
+  const slides = obSlides();
+  $("#obBody").innerHTML = slides[obStep];
+  $("#obDots").innerHTML = slides.map((_, i) => `<i class="${i === obStep ? "on" : ""}"></i>`).join("");
+  $("#obBack").style.visibility = obStep ? "visible" : "hidden";
+  $("#obNext").textContent = obStep === slides.length - 1 ? `Start: log ${MEALS.find((m) => m[0] === guessMeal())[1].toLowerCase()}` : "Next";
+}
+function openOnboarding(step = 0) {
+  obStep = step;
+  renderOnboarding();
+  if (!$("#onboardSheet").open) $("#onboardSheet").showModal();
+}
+function finishOnboarding(then) {
+  try { localStorage.setItem(ONBOARD_KEY, "1"); } catch {}
+  $("#onboardSheet").close();
+  then?.();
+}
+$("#obNext").onclick = () => {
+  if (obStep < obSlides().length - 1) { obStep++; renderOnboarding(); }
+  else finishOnboarding(() => openAdd(guessMeal()));
+};
+$("#obBack").onclick = () => { if (obStep > 0) { obStep--; renderOnboarding(); } };
+$("#obSkip").onclick = () => finishOnboarding();
+$("#obBody").addEventListener("click", (e) => { if (e.target.closest("[data-ob='sync']")) finishOnboarding(openSettings); });
+function maybeOnboard() {
+  let seen = null;
+  try { seen = localStorage.getItem(ONBOARD_KEY); } catch {}
+  if (!seen) setTimeout(() => openOnboarding(0), 300);
+  return !seen;
+}
+
 // Mon–Sun dots: perfect / good / bad / missed / upcoming.
 function weekStrip(today) {
   const [y, m, d] = today.split("-").map(Number);
@@ -422,6 +560,7 @@ function weekStrip(today) {
     } else if (date < today) {
       if (!info) cls = "none";
       else if (info.perfect) { cls = "perfect"; mark = "★"; }
+      else if (info.frozen) { cls = "frozen"; mark = "❄"; }
       else if (!info.logged) { cls = "missed"; mark = "✕"; }
       else if (info.xp < 0) { cls = "bad"; mark = "✕"; }
       else { cls = "good"; mark = "✓"; }
@@ -458,6 +597,7 @@ function renderQuestMenu(td, T) {
   const n = todo.length;
   $("#questCount").textContent = n || "✓";
   $("#questCount").classList.toggle("clear", n === 0);
+  $("#questCount").classList.toggle("calm", n > 0 && new Date().getHours() < 18);
   $("#questBtn").hidden = curDate !== localDate();
 }
 
@@ -658,11 +798,11 @@ function saveAmount() {
       id: newId, date: curDate, meal, junk, name: f.brand ? `${f.name} (${f.brand})` : f.name,
       foodId: f.id, grams, per100: { ...f.per100 }, n: scale(f.per100, grams), createdAt: Date.now(),
     });
-    if (!junk) toast(`Added to ${MEALS.find((m) => m[0] === meal)[1]}`);
   }
   closeSheet("#amountSheet");
   closeSheet("#addSheet");
   if (newId) afterAdd([newId], before);
+  celebrate = true;
   render();
 }
 // Junk alert, or "you just went over" alert, after logging something for today.
@@ -701,6 +841,7 @@ function logItems(items, meal, label) {
   save();
   closeSheet("#addSheet");
   afterAdd(ids, before);
+  celebrate = true;
   render();
   if (!items.some((i) => i.junk)) toast(`${label}: ${items.length} item${items.length > 1 ? "s" : ""} added`);
 }
@@ -1126,6 +1267,7 @@ function addAiItems() {
   closeSheet("#aiSheet");
   closeSheet("#addSheet");
   afterAdd(ids, before);
+  celebrate = true;
   render();
   toast(`Added ${chosen.length} item${chosen.length > 1 ? "s" : ""}`);
 }
@@ -1353,6 +1495,7 @@ function saveWeight() {
   if (!kg || kg < 25 || kg > 400) { toast("Enter your weight in kg"); return; }
   const today = localDate();
   upsert("weights", { id: today, date: today, kg });
+  celebrate = true;
   render();
   renderProgress();
   toast("Weighed in");
@@ -1543,7 +1686,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 render();
-maybeShowRecap();
+if (!maybeOnboard()) maybeShowRecap();
 if (syncConfigured()) syncNow(); else setSyncState("", "Sync not set up");
 
 // To-do dropdown in the header

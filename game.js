@@ -2,7 +2,7 @@
 // Everything is DERIVED from the log (entries + weigh-ins), so it stays consistent
 // across devices and updates if you edit past days.
 
-import { rankFor } from "./ranks.js?v=7";
+import { rankFor } from "./ranks.js?v=8";
 
 export const MAIN_MEALS = ["breakfast", "lunch", "dinner"];
 
@@ -19,6 +19,7 @@ export const XP = {
   weighIn: 5,
   perfect: 25,       // 3 meals + protein + calories + no junk
   missed: -30,       // past day with nothing logged
+  firstDay: 50,      // log all 3 main meals on your first day
 };
 
 export const titleFor = (lvl) => rankFor(lvl).label;
@@ -71,8 +72,12 @@ export function computeGame(db, today) {
   const T = db.settings.targets;
   const entries = Object.values(db.entries).filter((e) => !e.deleted);
   const weights = Object.values(db.weights || {}).filter((w) => !w.deleted && w.kg > 0);
+  // Late-log rule: food logged after noon the NEXT day still shows up, but earns no LP.
+  const deadline = (d) => { const [y, m, dd] = d.split("-").map(Number); return new Date(y, m - 1, dd + 1, 12).getTime(); };
   const byDate = new Map();
+  let lateCount = 0;
   for (const e of entries) {
+    if (e.createdAt && e.createdAt > deadline(e.date)) { lateCount++; continue; }
     if (!byDate.has(e.date)) byDate.set(e.date, []);
     byDate.get(e.date).push(e);
   }
@@ -83,6 +88,8 @@ export function computeGame(db, today) {
   const days = new Map();
   let running = 0, streak = 0, bestStreak = 0, perfectRun = 0, bestPerfectRun = 0, cleanRun = 0, bestCleanRun = 0;
   let proteinDays = 0, perfectDays = 0, loggedDays = 0;
+  let freezes = 1; // start with one streak freeze; earn one per 7-day streak (max 2)
+  const FREEZE_MAX = 2;
 
   for (let d = firstDay; d <= today; d = addDays(d, 1)) {
     const closed = d < today;
@@ -96,9 +103,12 @@ export function computeGame(db, today) {
     const proteinHit = tot.p >= T.p;
     const calLow = T.kcal - 300, calHigh = T.kcal * 1.05;
     let calOK = false;
+    // A closed day that would break the streak uses a freeze if one is banked.
+    const frozen = closed && meals < 2 && streak > 0 && freezes > 0;
+    if (frozen) freezes--;
 
     if (!list.length) {
-      if (closed) items.push([XP.missed, "Missed day: nothing logged"]);
+      if (closed) items.push(frozen ? [0, "Streak freeze used: no penalty"] : [XP.missed, "Missed day: nothing logged"]);
     } else {
       if (meals) items.push([XP.meal * meals, `${meals}/3 main meals logged`]);
       if (proteinHit) items.push([XP.protein, "Protein goal hit"]);
@@ -116,10 +126,11 @@ export function computeGame(db, today) {
     if (weighedOn.has(d)) items.push([XP.weighIn, "Weighed in"]);
     const perfect = closed && meals === 3 && proteinHit && calOK && !junkList.length;
     if (perfect) items.push([XP.perfect, "PERFECT DAY"]);
+    if (d === firstDay && meals === 3) items.push([XP.firstDay, "First-day bonus"]);
 
     // Streak = consecutive days with 2+ main meals logged. Today only extends it, never breaks it.
-    if (meals >= 2) streak++;
-    else if (closed) streak = 0;
+    if (meals >= 2) { streak++; if (streak % 7 === 0) freezes = Math.min(FREEZE_MAX, freezes + 1); }
+    else if (closed && !frozen) streak = 0;
     bestStreak = Math.max(bestStreak, streak);
     if (closed) {
       perfectRun = perfect ? perfectRun + 1 : 0;
@@ -141,7 +152,7 @@ export function computeGame(db, today) {
 
     const xp = items.reduce((a, [x]) => a + x, 0);
     running = Math.max(0, running + xp);
-    days.set(d, { date: d, total: running, closed, xp, items, warn, tot, meals, junk: junkList.length, proteinHit, calOK, perfect, logged: list.length > 0, streak });
+    days.set(d, { date: d, total: running, closed, xp, items, warn, tot, meals, junk: junkList.length, proteinHit, calOK, perfect, logged: list.length > 0, streak, frozen, freezes });
   }
 
   const todayInfo = days.get(today);
@@ -218,7 +229,7 @@ export function computeGame(db, today) {
   }
 
   return {
-    days, today: todayInfo, totalXP: running, ...lv, title: titleFor(lv.level), rank: rankFor(lv.level), nextRank: rankFor(lv.level + 1), streak: curStreak, bestStreak,
+    days, today: todayInfo, totalXP: running, ...lv, title: titleFor(lv.level), rank: rankFor(lv.level), nextRank: rankFor(lv.level + 1), streak: curStreak, bestStreak, freezes, lateCount,
     badges, firstDay, yesterday: days.get(yesterday),
     weight: { avgNow, avgPrev, ratePerWeek, lost, expectedRate, avgKcal, avgProtein, count: wsorted.length, latest: wsorted[wsorted.length - 1] },
     coach,

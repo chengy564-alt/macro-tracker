@@ -12,7 +12,7 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
   <header class="topbar">
@@ -204,6 +204,16 @@
     <div id="progressBody"></div>
   </dialog>
 
+  <!-- Onboarding -->
+  <dialog id="onboardSheet" class="sheet onboard">
+    <div class="ob-top"><span class="ob-dots" id="obDots"></span><button class="link-btn" id="obSkip">Skip</button></div>
+    <div id="obBody"></div>
+    <div class="row ob-nav">
+      <button class="btn ghost" id="obBack">Back</button>
+      <button class="btn primary grow" id="obNext">Next</button>
+    </div>
+  </dialog>
+
   <!-- Weekly recap -->
   <dialog id="recapSheet" class="sheet recap">
     <div id="recapBody"></div>
@@ -262,6 +272,6 @@
     </div>
   </dialog>
 
-  <script type="module" src="app.js?v=7"></script>
+  <script type="module" src="app.js?v=8"></script>
 </body>
 </html>

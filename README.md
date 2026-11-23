@@ -8,6 +8,8 @@ A personal calorie and macro tracker (calories, protein, carbs, fat and sodium).
 - **Game layer** to keep you consistent:
   - **Ranked LP (Iron IV → Challenger).** You earn LP for logging meals, hitting protein, landing your calories and staying junk-free. Junk, overeating and skipped days *cost* LP, and you can get demoted. What is left today sits in the list icon in the header.
   - **Streak.** Counts days with 2+ main meals logged. Each day in a row adds +5% LP, up to +70%. A junk or over-target day gets no bonus.
+  - **Streak freezes.** You start with 1 and earn one per 7-day streak (max 2). A missed day uses one instead of breaking your streak. Log yesterday before noon to repair it; food logged later still shows but earns no LP.
+  - **Instant rewards.** +LP pops when you log, quest-complete celebrations, a first-day bonus, and a 3-screen intro on first open.
   - **Daily quests, junk alerts** (with an undo), and **badges**.
   - **Weigh-ins & cut coach.** The coach tracks your 7-day average weight, kg/week and weeks to goal, and tells you when to adjust.
   - Everything is computed from your log, so it's the same on every device and fixes itself if you edit a past day.
