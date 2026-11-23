@@ -1,9 +1,9 @@
 // Macro Log: a personal food/macro tracker. Static site, no server.
 // Data lives in localStorage and (optionally) syncs to a private GitHub repo.
 
-import { GENERIC_FOODS } from "./foods.js?v=6";
-import { computeGame, questsFor, autoJunk, isJunkName, XP } from "./game.js?v=6";
-import { emblemSVG, rankFor, TIERS, firstLevelOfTier } from "./ranks.js?v=6";
+import { GENERIC_FOODS } from "./foods.js?v=7";
+import { computeGame, questsFor, autoJunk, isJunkName, XP, lpForLevel, levelFromXP, weekRecap, mondayOf } from "./game.js?v=7";
+import { emblemSVG, rankFor, TIERS, firstLevelOfTier } from "./ranks.js?v=7";
 
 const BARCODE_PONYFILL_URL = "https://cdn.jsdelivr.net/npm/barcode-detector@3.2.3/ponyfill/+esm";
 
@@ -73,14 +73,15 @@ function mealOptions(sel) {
 // ---------- storage ----------
 function emptyDb() {
   return {
-    foods: {}, entries: {}, weights: {},
-    settings: { targets: { kcal: 1872, p: 140, c: 164, f: 73, na: 2300 }, maintenance: 2372, goalKg: null, updatedAt: 0 },
+    foods: {}, entries: {}, weights: {}, templates: {},
+    settings: { targets: { kcal: 1872, p: 140, c: 164, f: 73, na: 2300 }, maintenance: 2372, goalKg: null, fasting: { on: false, hours: 16 }, updatedAt: 0 },
   };
 }
 function normalizeDb(d) {
   const e = emptyDb();
   const out = { ...e, ...d };
   out.weights = out.weights || {};
+  out.templates = out.templates || {};
   out.settings = { ...e.settings, ...(d.settings || {}) };
   return out;
 }
@@ -91,7 +92,7 @@ function loadDb() {
   } catch {}
   return emptyDb();
 }
-const COLLS = ["foods", "entries", "weights"];
+const COLLS = ["foods", "entries", "weights", "templates"];
 let db = loadDb();
 function persist() {
   try { localStorage.setItem(DATA_KEY, JSON.stringify(db)); } catch { toast("Couldn't save on this device"); }
@@ -176,7 +177,7 @@ async function pullRemote() {
   return { data: JSON.parse(text), sha: j.sha };
 }
 function mergeDb(a, b) {
-  const out = { foods: {}, entries: {}, weights: {}, settings: a.settings };
+  const out = { foods: {}, entries: {}, weights: {}, templates: {}, settings: a.settings };
   for (const c of COLLS) {
     out[c] = { ...(a[c] || {}) };
     for (const [id, r] of Object.entries(b?.[c] || {})) {
@@ -240,6 +241,30 @@ let curDate = localDate();
 function dayEntries(date) {
   return live("entries").filter((e) => e.date === date).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
 }
+// ---------- fasting timer (counts from your last logged food) ----------
+function fastingInfo() {
+  const f = db.settings.fasting;
+  if (!f?.on) return null;
+  const now = Date.now(), since = now - 36 * 3600e3;
+  const last = live("entries").reduce((m, e) => (e.createdAt > m && e.createdAt > since && e.createdAt <= now ? e.createdAt : m), 0);
+  if (!last) return { none: true };
+  const el = now - last, goal = (f.hours || 16) * 3600e3;
+  return { el, goal, done: el >= goal, opens: new Date(last + goal) };
+}
+function fastingHtml() {
+  const fi = fastingInfo();
+  if (!fi) return "";
+  if (fi.none) return `<div class="fast" id="fastRow"><span class="muted small">Fasting timer starts from the next food you log.</span></div>`;
+  const h = Math.floor(fi.el / 3600e3), m = Math.floor((fi.el % 3600e3) / 60e3);
+  const pct = Math.min(100, (fi.el / fi.goal) * 100);
+  const opens = fi.opens.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return `<div class="fast${fi.done ? " done" : ""}" id="fastRow">
+    <div class="mtop"><span>${fi.done ? "Fast complete" : "Fasting"}</span><span class="num"><b>${h}h ${String(m).padStart(2, "0")}m</b><span class="muted"> / ${db.settings.fasting.hours}h</span></span></div>
+    <div class="mbar"><i style="width:${pct}%;background:${fi.done ? "var(--lime)" : "var(--f)"}"></i></div>
+    <div class="muted small" style="margin-top:4px">${fi.done ? "Eating window is open." : `Eating window opens at ${opens}.`} Counted from your last logged food.</div></div>`;
+}
+setInterval(() => { const r = $("#fastRow"); if (r) r.outerHTML = fastingHtml(); }, 60000);
+
 // How the day's calories are split across meals (for per-meal budgets).
 const MEAL_SPLIT = { breakfast: 0.25, lunch: 0.35, dinner: 0.3, snacks: 0.1 };
 const MEAL_ICON = {
@@ -276,11 +301,16 @@ function render() {
         ${macro("p", "Protein")}${macro("c", "Carbs")}${macro("f", "Fat")}
       </div>
     </div>
-    <div class="hero-foot muted small num">Sodium ${r0(tot.na).toLocaleString()} / ${r0(t.na).toLocaleString()} mg</div>`;
+    <div class="hero-foot muted small num">Sodium ${r0(tot.na).toLocaleString()} / ${r0(t.na).toLocaleString()} mg</div>
+    ${curDate === localDate() ? fastingHtml() : ""}`;
 
   // Meals timeline
   const isToday = curDate === localDate();
   const nowMeal = isToday ? guessMeal() : null;
+  const yList = dayEntries(addDays(curDate, -1));
+  const mains = ["breakfast", "lunch", "dinner"];
+  const emptyMains = mains.filter((m) => !list.some((e) => e.meal === m));
+  const aim = emptyMains.length ? Math.round(Math.max(0, t.p - tot.p) / emptyMains.length) : 0;
   $("#meals").innerHTML = `<section class="card timeline">${MEALS.map(([key, label]) => {
     const es = list.filter((e) => e.meal === key);
     const st = sum(es);
@@ -297,14 +327,15 @@ function render() {
           <span class="meal-kcal num${mealOver ? " danger-text" : ""}"><b>${r0(st.kcal)}</b><span class="muted"> / ${budget}</span></span>
         </div>
         <div class="meal-bar">${segs.map(([k, v]) => `<i style="width:${kc(v)}%;background:var(--${k})"></i>`).join("")}</div>
+        ${!es.length && key !== "snacks" && aim > 0 ? `<div class="aim">Aim for <b>~${aim}g protein</b> here to hit ${t.p}g</div>` : ""}
         ${es.map((e) => `<div class="food${e.junk ? " junk" : ""}" data-entry="${e.id}">
             <span class="avatar">${esc((e.name.match(/[A-Za-z0-9]/) || ["•"])[0].toUpperCase())}</span>
             <div class="grow"><div class="name">${esc(e.name)}${e.junk ? ' <span class="pill bad">junk</span>' : ""}</div>
             <div class="sub num">${r0(e.grams)}g · <span style="color:var(--p)">P ${r0(e.n.p)}</span> · C ${r0(e.n.c)} · F ${r0(e.n.f)}${e.estimated ? " · est." : ""}</div></div>
             <div class="kcal num">${r0(e.n.kcal)}</div></div>`).join("")}
         ${es.length
-          ? `<button class="add-more" data-add="${key}">+ Add to ${label.toLowerCase()}</button>`
-          : `<button class="log-cta" data-add="${key}"><span>+ Log ${label.toLowerCase()}</span>${lp}</button>`}
+          ? `<div class="meal-actions"><button class="add-more" data-add="${key}">+ Add to ${label.toLowerCase()}</button><button class="link-btn" data-save-meal="${key}">Save as meal</button></div>`
+          : `<button class="log-cta" data-add="${key}"><span>+ Log ${label.toLowerCase()}</span>${lp}</button>${(() => { const y = yList.filter((e) => e.meal === key); return y.length ? `<button class="repeat" data-repeat="${key}"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3M20 4v5h-5M20 12a8 8 0 0 1-14 5.3M4 20v-5h5"/></svg>Same as yesterday · ${r0(sum(y).kcal)} kcal</button>` : ""; })()}`}
       </div>
     </div>`;
   }).join("")}</section>`;
@@ -547,6 +578,12 @@ function renderSearch() {
       <div class="grow"><div class="name">${esc(f.name)}${tag ? `<span class="tag">${tag}</span>` : ""}</div>
       <div class="sub">${esc(f.brand ? f.brand + " · " : "")}${foodSub(f)}</div></div></button>`;
   let html = "";
+  const tpls = live("templates").filter((tp) => !q || words.every((w) => tp.name.toLowerCase().includes(w)));
+  if (tpls.length) html += `<div class="section-label">Saved meals</div>` + tpls.map((tp) => {
+    const n = sum(tp.items.map((i) => ({ n: scale(i.per100, i.grams) })));
+    return `<div class="item tpl" data-template="${tp.id}"><span class="avatar">★</span><div class="grow"><div class="name">${esc(tp.name)}</div>
+      <div class="sub">${tp.items.length} items · ${r0(n.kcal)} kcal · P ${r0(n.p)}g</div></div><button class="icon-btn small-x" data-del-template="${tp.id}" aria-label="Delete saved meal">✕</button></div>`;
+  }).join("");
   if (mine.length) html += `<div class="section-label">${q ? "My foods" : "Recent"}</div>` + mine.slice(0, q ? 30 : 15).map((f) => row(f)).join("");
   if (generic.length) html += `<div class="section-label">Basics (approx.)</div>` + generic.slice(0, 20).map((f) => row(f, "basic")).join("");
   if (!html) html = `<div class="empty">${q ? "No match. Try “Search packaged foods online”, or New food." : "Your foods will show up here. Search for basics like “rice” or “chicken”."}</div>`;
@@ -646,6 +683,39 @@ function afterAdd(ids, beforeKcal) {
       ],
     });
   }
+}
+
+// ---------- quick re-log: copy items (yesterday's meal or a saved meal) ----------
+function logItems(items, meal, label) {
+  if (!items.length) return;
+  const before = sum(dayEntries(localDate())).kcal;
+  const now = Date.now();
+  const ids = items.map((it, k) => {
+    const id = uid() + k;
+    db.entries[id] = {
+      id, date: curDate, meal, name: it.name, grams: it.grams, per100: { ...it.per100 }, n: scale(it.per100, it.grams),
+      foodId: it.foodId, junk: !!it.junk, estimated: !!it.estimated, createdAt: now + k, updatedAt: now,
+    };
+    return id;
+  });
+  save();
+  closeSheet("#addSheet");
+  afterAdd(ids, before);
+  render();
+  if (!items.some((i) => i.junk)) toast(`${label}: ${items.length} item${items.length > 1 ? "s" : ""} added`);
+}
+function saveTemplate(meal) {
+  const items = dayEntries(curDate).filter((e) => e.meal === meal);
+  if (!items.length) return;
+  const label = MEALS.find((m) => m[0] === meal)[1];
+  const name = prompt("Name this meal", `My usual ${label.toLowerCase()}`);
+  if (!name) return;
+  upsert("templates", {
+    id: uid(), name: name.trim(), meal,
+    items: items.map((e) => ({ name: e.name, grams: e.grams, per100: e.per100, foodId: e.foodId, junk: !!e.junk, estimated: !!e.estimated })),
+    createdAt: Date.now(),
+  });
+  toast(`Saved “${name.trim()}”. Find it under ＋.`);
 }
 
 // ---------- food editor ----------
@@ -1063,6 +1133,154 @@ function currentEditorDraft() {
   return { id: foodEdit?.food?.id, barcode: $("#fBarcode").value.trim(), name: $("#fName").value.trim(), brand: $("#fBrand").value.trim() };
 }
 
+// ---------- charts (single y-axis, 2px lines, hover crosshair + tooltip) ----------
+const chartData = new Map();
+function niceTicks(lo, hi, n = 3) {
+  const span = hi - lo || 1;
+  const step0 = span / n, mag = 10 ** Math.floor(Math.log10(step0));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= step0);
+  const out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(6));
+  return out;
+}
+const shortDate = (d) => { const [y, m, dd] = d.split("-").map(Number); return new Date(y, m - 1, dd).toLocaleDateString(undefined, { month: "short", day: "numeric" }); };
+// dates: x domain; line: values aligned to dates (null = gap); dots: optional raw points; refs: [{y, label}]
+function lineChart(id, { dates, line, dots = null, refs = [], fmt = (v) => String(v), tip }) {
+  const W = 340, H = 150, L = 38, R = 10, T = 12, B = 22;
+  const vals = [...line, ...(dots || [])].filter((v) => v != null).concat(refs.map((r) => r.y));
+  if (!vals.length) return `<div class="chart-empty muted small">Not enough data yet.</div>`;
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = (hi - lo || Math.abs(hi) * 0.1 || 1) * 0.12;
+  lo -= pad; hi += pad;
+  const x = (i) => L + (i * (W - L - R)) / Math.max(1, dates.length - 1);
+  const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  const ticks = niceTicks(lo, hi);
+  let path = "", pen = false;
+  line.forEach((v, i) => { if (v == null) { pen = false; return; } path += `${pen ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`; pen = true; });
+  const lastI = line.map((v, i) => (v == null ? -1 : i)).filter((i) => i >= 0).pop();
+  chartData.set(id, { dates, line, dots, tip, W, L, R, x, y });
+  return `<div class="chart" data-chart="${id}">
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img">
+      ${ticks.map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="grid"/><text x="${L - 6}" y="${y(v) + 3.5}" class="tick" text-anchor="end">${fmt(v)}</text>`).join("")}
+      ${refs.map((r) => `<line x1="${L}" x2="${W - R}" y1="${y(r.y)}" y2="${y(r.y)}" class="ref"/><text x="${W - R}" y="${y(r.y) - 4}" class="ref-label" text-anchor="end">${esc(r.label)}</text>`).join("")}
+      <text x="${L}" y="${H - 6}" class="tick">${shortDate(dates[0])}</text><text x="${W - R}" y="${H - 6}" class="tick" text-anchor="end">${shortDate(dates[dates.length - 1])}</text>
+      ${dots ? dots.map((v, i) => (v == null ? "" : `<circle cx="${x(i)}" cy="${y(v)}" r="2.5" class="dot"/>`)).join("") : ""}
+      <path d="${path}" class="line"/>
+      ${lastI != null ? `<circle cx="${x(lastI)}" cy="${y(line[lastI])}" r="4" class="end"/>` : ""}
+      <line class="cross" y1="${T}" y2="${H - B}" x1="-10" x2="-10"/><circle class="hover-dot" r="5" cx="-10" cy="-10"/>
+    </svg>
+    <div class="chart-tip" hidden></div>
+  </div>`;
+}
+document.addEventListener("pointermove", (e) => {
+  const el = e.target.closest?.("[data-chart]");
+  document.querySelectorAll(".chart.active").forEach((c) => { if (c !== el) { c.classList.remove("active"); c.querySelector(".chart-tip").hidden = true; } });
+  if (!el) return;
+  const d = chartData.get(el.dataset.chart);
+  if (!d) return;
+  const svg = el.querySelector("svg"), rect = svg.getBoundingClientRect();
+  const sx = ((e.clientX - rect.left) / rect.width) * d.W;
+  let i = Math.round(((sx - d.L) / (d.W - d.L - d.R)) * (d.dates.length - 1));
+  i = Math.max(0, Math.min(d.dates.length - 1, i));
+  // snap to nearest index that has data
+  let best = -1;
+  for (let k = 0; k < d.dates.length; k++) if ((d.line[k] != null || d.dots?.[k] != null) && (best < 0 || Math.abs(k - i) < Math.abs(best - i))) best = k;
+  if (best < 0) return;
+  const v = d.line[best] ?? d.dots?.[best];
+  const cx = d.x(best), cy = d.y(v);
+  const cross = svg.querySelector(".cross"), dot = svg.querySelector(".hover-dot");
+  cross.setAttribute("x1", cx); cross.setAttribute("x2", cx);
+  dot.setAttribute("cx", cx); dot.setAttribute("cy", cy);
+  el.classList.add("active");
+  const tipEl = el.querySelector(".chart-tip");
+  tipEl.innerHTML = d.tip(best);
+  tipEl.hidden = false;
+  const px = (cx / d.W) * rect.width;
+  tipEl.style.left = `${Math.max(4, Math.min(rect.width - tipEl.offsetWidth - 4, px - tipEl.offsetWidth / 2))}px`;
+});
+
+function lpChartHtml(g) {
+  const today = localDate();
+  const dates = Array.from({ length: 30 }, (_, i) => addDays(today, i - 29));
+  const line = dates.map((d) => g.days.get(d)?.total ?? null);
+  const nextTier = Math.min(TIERS.length - 1, g.rank.tier + 1);
+  const refs = nextTier > g.rank.tier ? [{ y: lpForLevel(firstLevelOfTier(nextTier)), label: TIERS[nextTier].name }] : [];
+  return lineChart("lp", {
+    dates, line, refs, fmt: (v) => Math.round(v),
+    tip: (i) => { const info = g.days.get(dates[i]); return `<b>${shortDate(dates[i])}</b> · ${info.total} LP<br><span class="${info.xp >= 0 ? "good-text" : "danger-text"}">${xpStr(info.xp)} that day</span> · ${esc(rankFor(levelFromXP(info.total).level).label)}`; },
+  });
+}
+function weightChartHtml() {
+  const today = localDate();
+  const dates = Array.from({ length: 30 }, (_, i) => addDays(today, i - 29));
+  const ws = live("weights").filter((w) => w.kg > 0);
+  const byDate = new Map(ws.map((w) => [w.date, w.kg]));
+  const dots = dates.map((d) => byDate.get(d) ?? null);
+  const line = dates.map((d) => {
+    const l = ws.filter((w) => w.date > addDays(d, -7) && w.date <= d);
+    return l.length ? l.reduce((a, w) => a + w.kg, 0) / l.length : null;
+  });
+  const goal = db.settings.goalKg;
+  const vals = [...dots, ...line].filter((v) => v != null);
+  const refs = goal && vals.length && goal >= Math.min(...vals) - 3 ? [{ y: goal, label: `Goal ${goal}` }] : [];
+  return lineChart("weight", {
+    dates, line, dots, refs, fmt: (v) => v.toFixed(1),
+    tip: (i) => `<b>${shortDate(dates[i])}</b>${dots[i] != null ? ` · ${dots[i].toFixed(1)} kg` : ""}${line[i] != null ? `<br>7-day avg ${line[i].toFixed(1)} kg` : ""}`,
+  });
+}
+
+// ---------- weekly recap ----------
+const RECAP_KEY = "mt-recap-seen-v1";
+function recapHtml(r) {
+  const s = rankFor(r.startLevel), e = rankFor(r.endLevel);
+  const moved = r.endLevel - r.startLevel;
+  const verdict = r.perfect >= 5 && !r.junk && r.loggedDays === 7 ? "Elite week. This is what a cut looks like."
+    : r.junk >= 2 ? `${r.junk} junk items cost you. Cut those and this is a big week.`
+    : r.lp >= 600 ? "Strong week. Stack another one."
+    : r.lp > 0 ? "Progress, but there's LP left on the table."
+    : "Rough week. The ladder doesn't care; next week does.";
+  const range = `${shortDate(r.monday)} – ${shortDate(r.sunday)}`;
+  const day = (x) => (x ? `${new Date(...x.date.split("-").map((n, i) => (i === 1 ? n - 1 : +n))).toLocaleDateString(undefined, { weekday: "long" })} (${xpStr(x.xp)} LP)` : "–");
+  return `
+    <div class="recap-kicker">Weekly recap · ${range}</div>
+    <div class="recap-hero ${r.lp >= 0 ? "good-text" : "danger-text"}">${xpStr(r.lp)} <span>LP</span></div>
+    <div class="recap-ranks">
+      <div>${emblemSVG(s.tier, 56)}<span>${esc(s.label)}</span></div>
+      <div class="recap-arrow ${moved > 0 ? "good-text" : moved < 0 ? "danger-text" : "muted"}">${moved > 0 ? "▲" : moved < 0 ? "▼" : "→"}</div>
+      <div>${emblemSVG(e.tier, 56)}<span>${esc(e.label)}</span></div>
+    </div>
+    <p class="recap-verdict">${verdict}</p>
+    <div class="stat-grid">
+      <div class="stat"><b>${r.perfect}</b><span>perfect days</span></div>
+      <div class="stat"><b>${r.loggedDays}/7</b><span>days logged</span></div>
+      <div class="stat"><b class="${r.junk ? "danger-text" : "good-text"}">${r.junk}</b><span>junk items</span></div>
+      <div class="stat"><b>${r.avgKcal}</b><span>avg kcal</span></div>
+      <div class="stat"><b>${r.avgProtein}g</b><span>avg protein</span></div>
+      <div class="stat"><b class="${r.weightChange != null && r.weightChange < 0 ? "good-text" : ""}">${r.weightChange == null ? "–" : (r.weightChange <= 0 ? "−" : "+") + Math.abs(r.weightChange).toFixed(1)}</b><span>kg vs last week</span></div>
+    </div>
+    <div class="recap-days">
+      <div><span class="muted small">Best day</span><b>${day(r.best)}</b></div>
+      <div><span class="muted small">Worst day</span><b>${day(r.worst)}</b></div>
+    </div>`;
+}
+function showRecap(monday) {
+  const r = weekRecap(game, db, monday);
+  if (!r) { toast("No logs that week"); return false; }
+  $("#recapBody").innerHTML = recapHtml(r);
+  $("#recapSheet").showModal();
+  return true;
+}
+function maybeShowRecap() {
+  const lastMonday = addDays(mondayOf(localDate()), -7);
+  let seen = null;
+  try { seen = localStorage.getItem(RECAP_KEY); } catch {}
+  if (seen && seen >= lastMonday) return;
+  if (!weekRecap(game, db, lastMonday)) return;
+  try { localStorage.setItem(RECAP_KEY, lastMonday); } catch {}
+  const open = () => ($("#alertSheet").open ? setTimeout(open, 800) : showRecap(lastMonday));
+  setTimeout(open, 600);
+}
+
 // ---------- progress (level, weight, coach, badges, XP history) ----------
 function renderProgress() {
   const g = game || computeGame(db, localDate());
@@ -1090,6 +1308,11 @@ function renderProgress() {
       <div class="stat"><b>${g.streak}</b><span>Streak · best ${g.bestStreak}</span></div>
     </div>
 
+    <button class="btn full" id="openRecap">Last week's recap</button>
+
+    <h3>LP <span class="muted small">last 30 days</span></h3>
+    ${lpChartHtml(g)}
+
     <h3>Ranked ladder</h3>
     <div class="ladder">${TIERS.map((t, i) => {
       const reached = g.rank.tier >= i, cur = g.rank.tier === i;
@@ -1106,6 +1329,8 @@ function renderProgress() {
       <div class="stat"><b class="${w.ratePerWeek > 0 ? "good-text" : ""}">${w.ratePerWeek == null ? "–" : (w.ratePerWeek >= 0 ? "−" : "+") + Math.abs(w.ratePerWeek).toFixed(2)}</b><span>kg / week</span></div>
       <div class="stat"><b>${w.count ? (w.lost >= 0 ? "−" : "+") + Math.abs(w.lost).toFixed(1) : "–"}</b><span>${goal ? `kg total · goal ${goal}` : "kg total"}</span></div>
     </div>
+    <div class="chart-head"><span class="muted small">Last 30 days</span><span class="legend"><i class="lg-dot"></i>daily <i class="lg-line"></i>7-day avg</span></div>
+    ${weightChartHtml()}
     ${g.coach.length ? `<div class="coach">${g.coach.map((c) => `<p>${esc(c)}</p>`).join("")}</div>` : ""}
 
     <h3>Badges <span class="muted small">${g.badges.filter((b) => b.earned).length}/${g.badges.length}</span></h3>
@@ -1140,12 +1365,14 @@ function openSettings() {
   $("#sOwner").value = s.ghOwner || ""; $("#sRepo").value = s.ghRepo || ""; $("#sToken").value = s.ghToken || "";
   $("#syncInfo").textContent = syncConfigured() ? lastSyncMsg : "Not set up";
   $("#tMaint").value = db.settings.maintenance ?? ""; $("#tGoal").value = db.settings.goalKg ?? "";
+  $("#fastOn").checked = !!db.settings.fasting?.on; $("#fastHours").value = db.settings.fasting?.hours ?? 16;
   openSheet("#settingsSheet");
 }
 function saveSettings() {
   db.settings = {
     targets: { kcal: num($("#tKcal").value) || 0, p: num($("#tP").value) || 0, c: num($("#tC").value) || 0, f: num($("#tF").value) || 0, na: num($("#tNa").value) || 0 },
     maintenance: num($("#tMaint").value) || null, goalKg: num($("#tGoal").value) || null,
+    fasting: { on: $("#fastOn").checked, hours: Math.min(23, Math.max(8, num($("#fastHours").value) || 16)) },
     updatedAt: Date.now(),
   };
   const before = JSON.stringify(secrets());
@@ -1191,6 +1418,7 @@ $("#openHistory").onclick = openProgress;
 $("#gameCard").onclick = openProgress;
 $("#progressBody").onclick = (e) => {
   if (e.target.id === "wSave") return saveWeight();
+  if (e.target.id === "openRecap") return showRecap(addDays(mondayOf(localDate()), -7));
   const tr = e.target.closest("[data-day]");
   if (tr) { curDate = tr.dataset.day; render(); closeSheet("#progressSheet"); }
 };
@@ -1199,6 +1427,13 @@ $("#alertSheet").addEventListener("close", () => setTimeout(nextAlert, 150));
 $("#meals").onclick = (e) => {
   const add = e.target.closest("[data-add]");
   if (add) return openAdd(add.dataset.add);
+  const rep = e.target.closest("[data-repeat]");
+  if (rep) {
+    const meal = rep.dataset.repeat;
+    return logItems(dayEntries(addDays(curDate, -1)).filter((x) => x.meal === meal), meal, "Same as yesterday");
+  }
+  const sv = e.target.closest("[data-save-meal]");
+  if (sv) return saveTemplate(sv.dataset.saveMeal);
   const en = e.target.closest("[data-entry]");
   if (en) {
     const entry = db.entries[en.dataset.entry];
@@ -1212,6 +1447,10 @@ $("#meals").onclick = (e) => {
 $("#addMeal").onchange = (e) => { addMeal = e.target.value; };
 $("#foodSearch").oninput = renderSearch;
 $("#searchResults").onclick = (e) => {
+  const del = e.target.closest("[data-del-template]");
+  if (del) { if (confirm("Delete this saved meal?")) { remove("templates", del.dataset.delTemplate); renderSearch(); } return; }
+  const tp = e.target.closest("[data-template]");
+  if (tp) { const t = db.templates[tp.dataset.template]; return logItems(t.items, addMeal, t.name); }
   const b = e.target.closest("[data-food]");
   if (b) openAmount(findFood(b.dataset.food));
 };
@@ -1304,6 +1543,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 render();
+maybeShowRecap();
 if (syncConfigured()) syncNow(); else setSyncState("", "Sync not set up");
 
 // To-do dropdown in the header

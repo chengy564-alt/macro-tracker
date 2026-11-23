@@ -12,7 +12,7 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
   <header class="topbar">
@@ -204,6 +204,12 @@
     <div id="progressBody"></div>
   </dialog>
 
+  <!-- Weekly recap -->
+  <dialog id="recapSheet" class="sheet recap">
+    <div id="recapBody"></div>
+    <button class="btn primary full" data-close>Next week. Let's go</button>
+  </dialog>
+
   <!-- Alerts: level up/down, junk, badges -->
   <dialog id="alertSheet" class="sheet alert">
     <div id="alertBody"></div>
@@ -225,6 +231,12 @@
       <label class="field"><span>Sodium mg</span><input id="tNa" type="number" inputmode="decimal"></label>
       <label class="field"><span>Maintenance kcal</span><input id="tMaint" type="number" inputmode="decimal"></label>
       <label class="field"><span>Goal weight kg</span><input id="tGoal" type="number" inputmode="decimal" step="0.1"></label>
+    </div>
+
+    <h3>Fasting timer</h3>
+    <div class="row tight">
+      <label class="check-row grow" style="margin:0"><input type="checkbox" id="fastOn" style="accent-color:var(--lime)"><span>Show fasting timer</span></label>
+      <label class="field" style="margin:0;width:110px"><span>Fast hours</span><input id="fastHours" type="number" inputmode="numeric" min="8" max="23"></label>
     </div>
 
     <h3>Sync between phone &amp; computer (GitHub)</h3>
@@ -250,6 +262,6 @@
     </div>
   </dialog>
 
-  <script type="module" src="app.js?v=6"></script>
+  <script type="module" src="app.js?v=7"></script>
 </body>
 </html>

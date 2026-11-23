@@ -447,3 +447,56 @@ dialog.alert .btn { min-width: 120px; }
 }
 .lp-text { line-height: 1.35; font-variant-numeric: tabular-nums; }
 .lvl-row .grow { min-width: 0; }
+
+/* ---------- quick re-log / pacing / fasting ---------- */
+.aim { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.aim b { color: var(--p); font-weight: 700; }
+.meal-actions { display: flex; justify-content: space-between; align-items: center; }
+.link-btn { background: none; border: 0; color: var(--muted); font-size: 12px; font-weight: 600; padding: 6px 0 0; cursor: pointer; }
+.link-btn:hover { color: var(--text); }
+.repeat {
+  width: 100%; margin-top: 6px; display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.repeat svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.repeat:hover { color: var(--text); border-color: var(--muted); }
+.item.tpl { cursor: pointer; }
+.item.tpl .avatar { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); }
+.small-x { width: 28px; height: 28px; font-size: 13px; color: var(--muted); }
+.fast { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.fast.done .mtop b { color: var(--lime); }
+
+/* ---------- charts ---------- */
+.chart { position: relative; margin: 4px 0 8px; touch-action: pan-y; }
+.chart svg { width: 100%; height: 150px; display: block; overflow: visible; }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .tick { fill: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.chart .ref { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; opacity: .7; }
+.chart .ref-label { fill: var(--muted); font-size: 10px; font-weight: 600; }
+.chart .line { fill: none; stroke: var(--lime); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.chart .dot { fill: var(--muted); opacity: .8; }
+.chart .end { fill: var(--lime); stroke: var(--card); stroke-width: 2; }
+.chart .cross { stroke: var(--muted); stroke-width: 1; opacity: 0; }
+.chart .hover-dot { fill: var(--lime); stroke: var(--card); stroke-width: 2; opacity: 0; }
+.chart.active .cross, .chart.active .hover-dot { opacity: 1; }
+.chart-tip {
+  position: absolute; top: -6px; pointer-events: none; background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 9px; font-size: 12px; line-height: 1.35; white-space: nowrap; box-shadow: 0 6px 18px rgba(0,0,0,.35);
+}
+.chart-empty { padding: 20px 0; text-align: center; }
+.chart-head { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+.legend { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.lg-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.lg-line { width: 14px; height: 2px; border-radius: 2px; background: var(--lime); display: inline-block; margin-left: 6px; }
+
+/* ---------- weekly recap ---------- */
+dialog.recap { text-align: center; padding: 26px 18px 18px; }
+.recap-kicker { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.recap-hero { font-size: 64px; font-weight: 850; letter-spacing: -.04em; line-height: 1; margin: 12px 0 6px; animation: pop .55s cubic-bezier(.2,1.4,.4,1); font-variant-numeric: tabular-nums; }
+.recap-hero span { font-size: 22px; letter-spacing: 0; }
+.recap-ranks { display: flex; align-items: center; justify-content: center; gap: 18px; margin: 10px 0; }
+.recap-ranks > div:not(.recap-arrow) { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 13px; font-weight: 700; }
+.recap-arrow { font-size: 20px; }
+.recap-verdict { font-size: 16px; font-weight: 600; margin: 8px 0 14px; }
+.recap-days { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 6px; text-align: left; }
+.recap-days > div { background: var(--bg); border-radius: 12px; padding: 10px 12px; display: grid; gap: 2px; font-size: 14px; }

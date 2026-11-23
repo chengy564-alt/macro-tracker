@@ -2,7 +2,7 @@
 // Everything is DERIVED from the log (entries + weigh-ins), so it stays consistent
 // across devices and updates if you edit past days.
 
-import { rankFor } from "./ranks.js?v=6";
+import { rankFor } from "./ranks.js?v=7";
 
 export const MAIN_MEALS = ["breakfast", "lunch", "dinner"];
 
@@ -26,6 +26,8 @@ export const titleFor = (lvl) => rankFor(lvl).label;
 // XP to go from level L to L+1.
 // LP to climb one division. Iron→Bronze ≈ 5 good days, Gold ≈ 3–4 weeks, Diamond ≈ 10 weeks, Challenger ≈ 15 weeks.
 export const xpForLevel = (L) => 150 + 25 * (L - 1);
+// Total LP needed to reach level L.
+export function lpForLevel(L) { let t = 0; for (let i = 1; i < L; i++) t += xpForLevel(i); return t; }
 export function levelFromXP(xp) {
   let L = 1, rest = xp;
   while (rest >= xpForLevel(L)) { rest -= xpForLevel(L); L++; }
@@ -139,7 +141,7 @@ export function computeGame(db, today) {
 
     const xp = items.reduce((a, [x]) => a + x, 0);
     running = Math.max(0, running + xp);
-    days.set(d, { date: d, closed, xp, items, warn, tot, meals, junk: junkList.length, proteinHit, calOK, perfect, logged: list.length > 0, streak });
+    days.set(d, { date: d, total: running, closed, xp, items, warn, tot, meals, junk: junkList.length, proteinHit, calOK, perfect, logged: list.length > 0, streak });
   }
 
   const todayInfo = days.get(today);
@@ -236,4 +238,33 @@ export function questsFor(g, T) {
     { icon: "🥦", label: "No junk food", xp: 10, done: false, failed: t.junk > 0, progress: t.junk ? `${t.junk} junk` : "clean so far" },
     { icon: "⚖️", label: "Weigh in", xp: 5, done: !!g.weighedToday, progress: "" },
   ];
+}
+
+// ---------- weekly recap ----------
+function addDaysW(d, n) { const [y, m, dd] = d.split("-").map(Number); const x = new Date(y, m - 1, dd + n); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; }
+export function mondayOf(date) {
+  const [y, m, d] = date.split("-").map(Number);
+  const dow = (new Date(y, m - 1, d).getDay() + 6) % 7;
+  return addDaysW(date, -dow);
+}
+export function weekRecap(g, db, monday) {
+  const dates = Array.from({ length: 7 }, (_, i) => addDaysW(monday, i));
+  const info = dates.map((d) => g.days.get(d)).filter(Boolean);
+  const logged = info.filter((x) => x.logged);
+  if (!logged.length) return null;
+  const before = g.days.get(addDaysW(monday, -1))?.total ?? 0;
+  const end = info[info.length - 1]?.total ?? before;
+  const avg = (f) => Math.round(logged.reduce((a, x) => a + f(x), 0) / logged.length);
+  const ws = Object.values(db.weights || {}).filter((w) => !w.deleted && w.kg > 0);
+  const wAvg = (from, to) => { const l = ws.filter((w) => w.date >= from && w.date <= to); return l.length ? l.reduce((a, w) => a + w.kg, 0) / l.length : null; };
+  const wNow = wAvg(monday, dates[6]), wPrev = wAvg(addDaysW(monday, -7), addDaysW(monday, -1));
+  const sorted = info.filter((x) => x.closed || x.logged).slice().sort((a, b) => b.xp - a.xp);
+  return {
+    monday, sunday: dates[6], lp: end - before, startLevel: levelFromXP(before).level, endLevel: levelFromXP(end).level,
+    perfect: info.filter((x) => x.perfect).length, loggedDays: logged.length,
+    junk: info.reduce((a, x) => a + x.junk, 0), proteinDays: info.filter((x) => x.proteinHit).length,
+    avgKcal: avg((x) => x.tot.kcal), avgProtein: avg((x) => x.tot.p),
+    weightChange: wNow != null && wPrev != null ? wNow - wPrev : null, weightAvg: wNow,
+    best: sorted[0], worst: sorted[sorted.length - 1],
+  };
 }
