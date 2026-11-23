@@ -2,6 +2,8 @@
 // Everything is DERIVED from the log (entries + weigh-ins), so it stays consistent
 // across devices and updates if you edit past days.
 
+import { rankFor } from "./ranks.js";
+
 export const MAIN_MEALS = ["breakfast", "lunch", "dinner"];
 
 export const XP = {
@@ -19,14 +21,11 @@ export const XP = {
   missed: -30,       // past day with nothing logged
 };
 
-export const TITLES = [
-  [1, "Rookie"], [3, "Committed"], [5, "Disciplined"], [8, "Shredder"],
-  [12, "Lean Machine"], [16, "Elite"], [20, "Legend"],
-];
-export const titleFor = (lvl) => TITLES.filter(([l]) => lvl >= l).pop()[1];
+export const titleFor = (lvl) => rankFor(lvl).label;
 
 // XP to go from level L to L+1.
-export const xpForLevel = (L) => 100 + 75 * (L - 1);
+// LP to climb one division. Iron→Bronze ≈ 5 good days, Gold ≈ 3–4 weeks, Diamond ≈ 10 weeks, Challenger ≈ 15 weeks.
+export const xpForLevel = (L) => 150 + 25 * (L - 1);
 export function levelFromXP(xp) {
   let L = 1, rest = xp;
   while (rest >= xpForLevel(L)) { rest -= xpForLevel(L); L++; }
@@ -191,8 +190,12 @@ export function computeGame(db, today) {
     B("kg3", "−3", "Three Down", "Trend weight down 3 kg", lost >= 3, [Math.max(0, Math.min(lost, 3)).toFixed(1), 3]),
     B("kg5", "−5", "Shredded Five", "Trend weight down 5 kg", lost >= 5, [Math.max(0, Math.min(lost, 5)).toFixed(1), 5]),
     B("goal", "◎", "Goal Weight", "Reach your goal weight", goal && avgNow != null && avgNow <= goal),
-    B("lv5", "L5", "Level 5", "Reach level 5", lv.level >= 5),
-    B("lv10", "L10", "Level 10", "Reach level 10", lv.level >= 10),
+    B("rBronze", "Br", "Bronze", "Get promoted to Bronze", lv.level >= 5),
+    B("rSilver", "Si", "Silver", "Get promoted to Silver", lv.level >= 9),
+    B("rGold", "Au", "Gold", "Get promoted to Gold", lv.level >= 13),
+    B("rPlat", "Pt", "Platinum", "Get promoted to Platinum", lv.level >= 17),
+    B("rDiamond", "Di", "Diamond", "Get promoted to Diamond", lv.level >= 25),
+    B("rChall", "Ch", "Challenger", "Reach Challenger", lv.level >= 31),
     B("e100", "100", "Centurion", "Log 100 items", entries.length >= 100, [Math.min(entries.length, 100), 100]),
   ];
 
@@ -213,7 +216,7 @@ export function computeGame(db, today) {
   }
 
   return {
-    days, today: todayInfo, totalXP: running, ...lv, title: titleFor(lv.level), streak: curStreak, bestStreak,
+    days, today: todayInfo, totalXP: running, ...lv, title: titleFor(lv.level), rank: rankFor(lv.level), nextRank: rankFor(lv.level + 1), streak: curStreak, bestStreak,
     badges, firstDay, yesterday: days.get(yesterday),
     weight: { avgNow, avgPrev, ratePerWeek, lost, expectedRate, avgKcal, avgProtein, count: wsorted.length, latest: wsorted[wsorted.length - 1] },
     coach,

@@ -6,8 +6,8 @@ A personal calorie and macro tracker (calories, protein, carbs, fat and sodium).
 - **Food library.** Includes ~45 built-in basics (rice, chicken, eggs…), plus anything you've scanned or typed in, sorted by most recent.
 - **Photo → Claude (free, no API key).** Tap *Copy prompt* and add a note like "180g cooked rice, 2 chicken thighs…". In the Claude app, attach the photo and paste the prompt. Then paste Claude's reply back into the tracker. It becomes an editable list of items with grams and macros. The same flow turns a nutrition-label photo into a new food. This uses your normal Claude plan.
 - **Game layer** to keep you consistent:
-  - **XP & levels.** You earn XP for logging meals, hitting protein, landing your calories and staying junk-free. Junk, overeating and skipped days *cost* XP, and you can drop a level.
-  - **Streak.** Counts days with 2+ main meals logged. Each day in a row adds +5% XP, up to +70%. A junk or over-target day gets no bonus.
+  - **Ranked LP (Iron IV → Challenger).** You earn LP for logging meals, hitting protein, landing your calories and staying junk-free. Junk, overeating and skipped days *cost* LP, and you can get demoted. What is left today sits in the list icon in the header.
+  - **Streak.** Counts days with 2+ main meals logged. Each day in a row adds +5% LP, up to +70%. A junk or over-target day gets no bonus.
   - **Daily quests, junk alerts** (with an undo), and **badges**.
   - **Weigh-ins & cut coach.** The coach tracks your 7-day average weight, kg/week and weeks to goal, and tells you when to adjust.
   - Everything is computed from your log, so it's the same on every device and fixes itself if you edit a past day.

@@ -3,6 +3,7 @@
 
 import { GENERIC_FOODS } from "./foods.js";
 import { computeGame, questsFor, autoJunk, isJunkName, XP } from "./game.js";
+import { emblemSVG, rankFor, TIERS, firstLevelOfTier } from "./ranks.js";
 
 const BARCODE_PONYFILL_URL = "https://cdn.jsdelivr.net/npm/barcode-detector@3.2.3/ponyfill/+esm";
 
@@ -281,17 +282,15 @@ function renderGame() {
   const T = db.settings.targets;
   const pct = Math.min(100, (game.into / game.need) * 100);
   const atRisk = game.level > 1 && game.into < 30;
-  const R = 26, C = 2 * Math.PI * R;
+  const nextIsTier = game.nextRank.tier !== game.rank.tier;
   $("#gameCard").innerHTML = `
     <div class="lvl-row">
-      <div class="ring${atRisk ? " risk" : ""}">
-        <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="${R}" class="ring-bg"/><circle cx="32" cy="32" r="${R}" class="ring-fg" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct / 100)}"/></svg>
-        <div class="ring-num"><small>LV</small>${game.level}</div>
-      </div>
+      <div class="emblem-wrap tier-${game.rank.id}">${emblemSVG(game.rank.tier, 64)}</div>
       <div class="grow">
-        <div class="lvl-title">${esc(game.title)}</div>
-        <div class="muted small num">${game.into} / ${game.need} XP</div>
-        ${atRisk ? `<div class="small danger-text">${game.into} XP above a level drop</div>` : `<div class="muted small">${game.need - game.into} XP to level ${game.level + 1}</div>`}
+        <div class="rank-name" style="--tier:${game.rank.c2}">${esc(game.rank.label)}</div>
+        <div class="lpbar${atRisk ? " risk" : ""}"><i style="width:${pct}%;background:${atRisk ? "var(--danger)" : game.rank.c2}"></i></div>
+        <div class="muted small lp-text">${game.into} / ${game.need} LP ·
+          ${atRisk ? `<span class="danger-text">${game.into} LP from demotion</span>` : `${game.need - game.into} LP to ${nextIsTier ? `<b style="color:${game.nextRank.c2}">${esc(game.nextRank.label)}</b>` : esc(game.nextRank.label)}`}</div>
       </div>
       <div class="streak${game.streak ? " on" : ""}">
         <svg viewBox="0 0 24 24" class="flame"><path d="M12 2c1 3.5 4.5 5.6 4.5 10a4.5 4.5 0 0 1-9 0c0-2 .8-3.3 1.8-4.5.2 1.7 1 2.7 2.2 3.2C11 8 11 5 12 2z"/></svg>
@@ -302,37 +301,32 @@ function renderGame() {
   // Banners (only on today's view)
   const banners = [];
   const h = new Date().getHours();
-  const td = game.today || { meals: 0, tot: { kcal: 0, p: 0 }, junk: 0, logged: false };
+  const td = game.today || { meals: 0, tot: { kcal: 0, p: 0 }, junk: 0, logged: false, xp: 0 };
   if (curDate === today) {
     const y = game.yesterday;
     if (y && !y.logged && y.date >= game.firstDay && !td.logged)
-      banners.push(["bad", `Nothing logged yesterday: <b>${XP.missed} XP</b> and your streak reset. Log breakfast to start a new one.`]);
+      banners.push(["bad", `Nothing logged yesterday: <b>${XP.missed} LP</b> and your streak reset. Log breakfast to start a new one.`]);
     else if (y && y.closed && y.xp < 0 && !td.logged)
-      banners.push(["bad", `Yesterday cost you <b>${y.xp} XP</b>. Today's the comeback: ${XP.protein + XP.calOnTarget + XP.meal * 3}+ XP on the table.`]);
+      banners.push(["bad", `Yesterday cost you <b>${y.xp} LP</b>. Today's the comeback: ${XP.protein + XP.calOnTarget + XP.meal * 3}+ LP on the table.`]);
     if (h >= 18 && td.meals < 2 && game.streak > 0)
       banners.push(["warn", `Your ${game.streak}-day streak ends at midnight. Log at least 2 main meals to keep it.`]);
     if (td.tot.kcal > T.kcal * 1.05)
-      banners.push(["bad", `${r0(td.tot.kcal - T.kcal)} kcal over today's target (${td.tot.kcal > T.kcal * 1.15 ? XP.overBig : XP.overSmall} XP). Stop here: anything else today makes it worse.`]);
+      banners.push(["bad", `${r0(td.tot.kcal - T.kcal)} kcal over today's target (${td.tot.kcal > T.kcal * 1.15 ? XP.overBig : XP.overSmall} LP). Stop here: anything else today makes it worse.`]);
     else if (h >= 20 && td.logged && td.tot.p < T.p * 0.85)
-      banners.push(["warn", `${r0(T.p - td.tot.p)}g protein to go. A shake or some chicken gets you the +${XP.protein} XP.`]);
+      banners.push(["warn", `${r0(T.p - td.tot.p)}g protein to go. A shake or some chicken gets you the +${XP.protein} LP.`]);
   }
   $("#banners").innerHTML = banners.map(([k, t]) => `<div class="banner ${k}">${t}</div>`).join("");
 
-  // Quests (today) or day score (past days)
+  renderQuestMenu(td, T);
+
+  // Past days get a score card; today's to-dos live in the header menu.
   if (curDate === today) {
-    const qs = questsFor(game, T);
-    const allPossible = qs.every((q) => !q.failed);
-    $("#quests").innerHTML = `
-      <div class="meal-head"><h2>Today's quests</h2><span class="muted">${xpStr(td.xp || 0)} XP so far</span></div>
-      ${qs.map((q) => `<div class="quest${q.done ? " done" : ""}${q.failed ? " failed" : ""}">
-        <span class="q-icon">${q.done ? "✓" : q.failed ? "✕" : ""}</span>
-        <span class="grow">${esc(q.label)}${q.progress ? ` <span class="muted small">· ${esc(q.progress)}</span>` : ""}</span>
-        <span class="q-xp">+${q.xp}</span></div>`).join("")}
-      <div class="muted small" style="margin-top:6px">${allPossible ? `Clear them all for a Perfect Day: +${XP.perfect} bonus. Calorie & junk-free XP lands at midnight.` : `Perfect Day is gone for today, but every other quest still counts.`}</div>`;
+    $("#quests").hidden = true;
   } else {
     const d = game.days.get(curDate);
+    $("#quests").hidden = false;
     $("#quests").innerHTML = d
-      ? `<div class="meal-head"><h2>Day score</h2><span class="${d.xp >= 0 ? "good-text" : "danger-text"}"><b>${xpStr(d.xp)} XP</b></span></div>
+      ? `<div class="meal-head"><h2>Day score</h2><span class="${d.xp >= 0 ? "good-text" : "danger-text"}" style="margin-left:auto"><b>${xpStr(d.xp)} LP</b></span></div>
          ${d.items.map(([x, l]) => `<div class="quest"><span class="grow">${esc(l)}</span><span class="${x >= 0 ? "good-text" : "danger-text"}">${xpStr(x)}</span></div>`).join("")}
          ${d.warn.map((w) => `<div class="banner warn" style="margin-top:8px">${esc(w)}</div>`).join("")}`
       : `<div class="muted small">Before you started logging, so no score.</div>`;
@@ -340,7 +334,37 @@ function renderGame() {
   checkProgressEvents();
 }
 
-// Level-up / level-down / new badge pop-ups. Remembers what this device has already shown.
+// Header dropdown: what's left to do today.
+const QICON = {
+  meals: '<path d="M7 3v8m-3-8v5a3 3 0 0 0 6 0V3M7 11v10M17 3c-2 2-3 4-3 7h3v11"/>',
+  protein: '<path d="M6 8v8M3 10v4M18 8v8M21 10v4M6 12h12"/>',
+  target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".5"/>',
+  clean: '<path d="M5 19c0-8 5-13 14-14-1 9-6 14-14 14zM5 19l7-7"/>',
+  weigh: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M9 9.5a4 4 0 0 1 6 0M12 12l1.5-2.5"/>',
+};
+const QKEYS = ["meals", "protein", "target", "clean", "weigh"];
+function renderQuestMenu(td, T) {
+  const qs = questsFor(game, T).map((q, i) => ({ ...q, key: QKEYS[i] }));
+  const todo = qs.filter((q) => !q.done && !q.failed);
+  const finished = qs.filter((q) => q.done || q.failed);
+  const allPossible = qs.every((q) => !q.failed);
+  const icon = (k) => `<svg viewBox="0 0 24 24" class="m-icon">${QICON[k]}</svg>`;
+  const row = (q) => `<div class="m-item${q.done ? " done" : ""}${q.failed ? " failed" : ""}">
+      ${icon(q.key)}<span class="grow">${esc(q.label)}${q.progress ? `<span class="m-sub">${esc(q.progress)}</span>` : ""}</span>
+      <span class="m-lp">${q.failed ? "✕" : q.done ? "✓" : `+${q.xp}`}</span></div>`;
+  $("#questMenu").innerHTML = `
+    <div class="m-head"><span>Still to do</span><span class="num">${xpStr(td.xp || 0)} LP today</span></div>
+    ${todo.length ? todo.map(row).join("") : `<div class="m-item done"><span class="grow">Nothing left. Clean day.</span></div>`}
+    ${finished.length ? `<div class="m-sep"></div>${finished.map(row).join("")}` : ""}
+    <div class="m-sep"></div>
+    <div class="m-foot">${allPossible ? `Clear everything: <b>+${XP.perfect} LP</b> Perfect Day bonus. Calorie and junk-free LP land at midnight.` : "Perfect Day is gone, but every other task still pays."}</div>`;
+  const n = todo.length;
+  $("#questCount").textContent = n || "✓";
+  $("#questCount").classList.toggle("clear", n === 0);
+  $("#questBtn").hidden = curDate !== localDate();
+}
+
+// Promotion / demotion / new badge pop-ups. Remembers what this device has already shown.
 const SEEN_KEY = "mt-game-seen-v1";
 function checkProgressEvents() {
   let seen = null;
@@ -348,12 +372,15 @@ function checkProgressEvents() {
   const earned = game.badges.filter((b) => b.earned).map((b) => b.id);
   const store = () => { try { localStorage.setItem(SEEN_KEY, JSON.stringify({ level: game.level, badges: earned })); } catch {} };
   if (!seen) { store(); return; }
+  const prev = rankFor(seen.level);
   if (game.level > seen.level) {
-    showAlert({ kind: "up", hero: `LV ${game.level}`, title: "Level up", sub: game.title,
-      body: `${game.need - game.into} XP to level ${game.level + 1}. Keep stacking clean days; the streak bonus grows every day (up to +70%).` });
+    const tierUp = game.rank.tier > prev.tier;
+    showAlert({ kind: "up", heroHtml: emblemSVG(game.rank.tier, 120), title: tierUp ? "Tier promotion" : "Promoted", sub: game.rank.label,
+      body: `${game.need - game.into} LP to ${game.nextRank.label}. Stack clean days; the streak bonus grows every day (up to +70%).` });
   } else if (game.level < seen.level) {
-    showAlert({ kind: "down", hero: `LV ${game.level}`, title: "You dropped a level", sub: game.title,
-      body: `Junk, overeating and skipped days cost XP. Win it back today: hit protein (+${XP.protein}) and land your calories (+${XP.calOnTarget}).` });
+    const tierDown = game.rank.tier < prev.tier;
+    showAlert({ kind: "down", heroHtml: emblemSVG(game.rank.tier, 120), title: tierDown ? `Demoted out of ${prev.name}` : "Demoted", sub: game.rank.label,
+      body: `Junk, overeating and skipped days cost LP. Win it back today: hit protein (+${XP.protein}) and land your calories (+${XP.calOnTarget}).` });
   }
   for (const id of earned.filter((x) => !seen.badges.includes(x))) {
     const b = game.badges.find((x) => x.id === id);
@@ -373,11 +400,11 @@ function nextAlert() {
   if (!a) return;
   $("#alertSheet").className = `sheet alert ${a.kind || ""}`;
   $("#alertBody").innerHTML = `
-    <div class="alert-hero">${esc(a.hero)}</div>
+    ${a.heroHtml ? `<div class="alert-emblem">${a.heroHtml}</div>` : `<div class="alert-hero">${esc(a.hero)}</div>`}
     <div class="alert-title">${esc(a.title)}</div>
     ${a.sub ? `<div class="alert-sub">${esc(a.sub)}</div>` : ""}
     ${a.body ? `<div class="alert-text">${a.html ? a.body : esc(a.body)}</div>` : ""}`;
-  const btns = a.buttons || [{ label: "Let's go", primary: true }];
+  const btns = a.buttons || [{ label: a.kind === "down" ? "Win it back" : "Let's go", primary: true }];
   $("#alertButtons").innerHTML = btns.map((b, i) => `<button class="btn ${b.primary ? "primary" : ""}" data-alert-btn="${i}">${esc(b.label)}</button>`).join("");
   $("#alertButtons").onclick = (e) => {
     const i = e.target.closest("[data-alert-btn]")?.dataset.alertBtn;
@@ -405,7 +432,7 @@ function junkAlert(addedIds) {
     left >= 0 ? `You have <b>${r0(left)} kcal</b> left today. Make it lean protein + veg.` : `You're now <b>${r0(-left)} kcal over</b> target.`,
   ];
   showAlert({
-    kind: "junk", hero: `${XP.junk * Math.min(junk.length, 3)} XP`, title: "Junk food logged", sub: junk.map((e) => e.name).join(", "), html: true,
+    kind: "junk", hero: `${XP.junk * Math.min(junk.length, 3)} LP`, title: "Junk food logged", sub: junk.map((e) => e.name).join(", "), html: true,
     body: lines.map((l) => `<p>${l}</p>`).join(""),
     buttons: [
       { label: "Undo, I won't eat it", onClick: () => { for (const e of junk) remove("entries", e.id); render(); toast("Removed. Good call."); } },
@@ -546,7 +573,7 @@ function afterAdd(ids, beforeKcal) {
   if (beforeKcal <= high && now > high) {
     showAlert({
       kind: "junk", hero: `+${r0(now - T.kcal)}`, title: "Over today's target", sub: `${r0(now)} of ${T.kcal} kcal`,
-      body: `That's ${now > T.kcal * 1.15 ? XP.overBig : XP.overSmall} XP. Close the kitchen for today: every extra bite makes it worse.`,
+      body: `That's ${now > T.kcal * 1.15 ? XP.overBig : XP.overSmall} LP. Close the kitchen for today: every extra bite makes it worse.`,
       buttons: [
         { label: "Undo", onClick: () => { for (const e of added) remove("entries", e.id); render(); } },
         { label: "Got it", primary: true },
@@ -992,15 +1019,21 @@ function renderProgress() {
 
   $("#progressBody").innerHTML = `
     <div class="stat-grid">
-      <div class="stat"><b>${g.level}</b><span>Level · ${esc(g.title)}</span></div>
-      <div class="stat"><b>${g.totalXP}</b><span>Total XP</span></div>
+      <div class="stat"><div class="stat-emblem">${emblemSVG(g.rank.tier, 34)}</div><span>${esc(g.rank.label)}</span></div>
+      <div class="stat"><b>${g.totalXP}</b><span>Total LP</span></div>
       <div class="stat"><b>${g.streak}</b><span>Streak · best ${g.bestStreak}</span></div>
     </div>
+
+    <h3>Ranked ladder</h3>
+    <div class="ladder">${TIERS.map((t, i) => {
+      const reached = g.rank.tier >= i, cur = g.rank.tier === i;
+      return `<div class="rung${reached ? " reached" : ""}${cur ? " current" : ""}">${emblemSVG(i, 44)}<span>${esc(t.name)}</span></div>`;
+    }).join("")}</div>
 
     <h3>Weight</h3>
     <div class="row tight">
       <input id="wInput" type="number" inputmode="decimal" step="0.1" placeholder="Today's weight (kg)" value="${todayW ? todayW.kg : ""}" class="grow">
-      <button class="btn primary" id="wSave">${todayW ? "Update" : `Weigh in +${XP.weighIn}`}</button>
+      <button class="btn primary" id="wSave">${todayW ? "Update" : `Weigh in +${XP.weighIn} LP`}</button>
     </div>
     <div class="stat-grid">
       <div class="stat"><b>${f1(w.avgNow)}</b><span>7-day avg kg</span></div>
@@ -1015,13 +1048,13 @@ function renderProgress() {
       <div class="badge-desc">${b.earned ? "Unlocked" : b.progress ? `${b.progress[0]}/${b.progress[1]}` : esc(b.desc)}</div></div>`).join("")}</div>
 
     <h3>Last 14 days</h3>
-    <table class="hist"><tr><th>Day</th><th>kcal</th><th>P</th><th>XP</th></tr>${rows.join("")}</table>
+    <table class="hist"><tr><th>Day</th><th>kcal</th><th>P</th><th>LP</th></tr>${rows.join("")}</table>
 
-    <h3>How XP works</h3>
+    <h3>How LP works</h3>
     <div class="muted small rules">
       <p>+${XP.meal} per main meal logged · +${XP.protein} protein hit · +${XP.calOnTarget} calories on target · +${XP.junkFree} junk-free · +${XP.weighIn} weigh-in · +${XP.perfect} perfect day</p>
       <p>Streak bonus: +5% per day in a row, up to +70%.</p>
-      <p class="danger-text">${XP.junk} per junk item · ${XP.overSmall} / ${XP.overBig} for going over · ${XP.missed} for a day with nothing logged. XP can fall, and so can your level.</p>
+      <p class="danger-text">${XP.junk} per junk item · ${XP.overSmall} / ${XP.overBig} for going over · ${XP.missed} for a day with nothing logged. LP can fall, and you can get demoted.</p>
     </div>`;
 }
 function saveWeight() {
@@ -1206,3 +1239,14 @@ document.addEventListener("visibilitychange", () => {
 
 render();
 if (syncConfigured()) syncNow(); else setSyncState("", "Sync not set up");
+
+// To-do dropdown in the header
+function toggleQuestMenu(force) {
+  const m = $("#questMenu");
+  const open = force ?? m.hidden;
+  m.hidden = !open;
+  $("#questBtn").setAttribute("aria-expanded", String(open));
+}
+$("#questBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleQuestMenu(); });
+document.addEventListener("click", (e) => { if (!e.target.closest(".menu-anchor")) toggleQuestMenu(false); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") toggleQuestMenu(false); });

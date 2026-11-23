@@ -21,6 +21,13 @@
     <button class="icon-btn" id="nextDay" aria-label="Next day">›</button>
     <span class="spacer"></span>
     <span class="sync-dot" id="syncDot" title="Sync status"></span>
+    <div class="menu-anchor">
+      <button class="icon-btn" id="questBtn" aria-label="What's left today" aria-haspopup="true" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg>
+        <span class="count" id="questCount"></span>
+      </button>
+      <div class="menu" id="questMenu" hidden></div>
+    </div>
     <button class="icon-btn" id="openHistory" aria-label="Progress"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg></button>
     <button class="icon-btn" id="openSettings" aria-label="Settings">⚙</button>
   </header>
@@ -73,7 +80,7 @@
       <span>Meal</span>
       <select id="amtMeal"></select>
     </label>
-    <label class="check-row"><input type="checkbox" id="amtJunk"><span>Junk food <span class="muted small">(costs XP)</span></span></label>
+    <label class="check-row"><input type="checkbox" id="amtJunk"><span>Junk food <span class="muted small">(costs LP)</span></span></label>
     <label class="field" id="amtDateWrap">
       <span>Date</span>
       <input id="amtDate" type="date">
