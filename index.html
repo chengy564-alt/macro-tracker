@@ -43,7 +43,7 @@
     </div>
     <div class="quick-actions">
       <button class="qa" id="qaScan"><span>▥</span>Scan barcode</button>
-      <button class="qa" id="qaPhoto"><span>◉</span>Photo / AI</button>
+      <button class="qa" id="qaPhoto"><span>◉</span>Photo → Claude</button>
       <button class="qa" id="qaManual"><span>✎</span>New food</button>
     </div>
     <input id="foodSearch" class="search" type="search" placeholder="Search my foods &amp; basics…" autocomplete="off">
@@ -88,7 +88,7 @@
       <div class="title grow" id="foodTitle">New food</div>
       <button class="icon-btn" data-close aria-label="Close">✕</button>
     </div>
-    <button class="btn ghost full" id="foodFromPhoto">◉ Fill from a photo of the label (AI)</button>
+    <button class="btn ghost full" id="foodFromPhoto">◉ Fill from a label photo (via Claude)</button>
     <label class="field"><span>Name</span><input id="fName" autocomplete="off"></label>
     <div class="grid2">
       <label class="field"><span>Brand</span><input id="fBrand" autocomplete="off"></label>
@@ -134,32 +134,38 @@
     <div id="scanNotFound" hidden class="notice">
       <p>Not in the database. Add it once and it's saved for next time:</p>
       <div class="row">
-        <button class="btn primary" id="nfPhoto">Photo of label (AI)</button>
+        <button class="btn primary" id="nfPhoto">Label photo via Claude</button>
         <button class="btn" id="nfManual">Type it in</button>
       </div>
     </div>
   </dialog>
 
-  <!-- AI photo -->
+  <!-- Photo via the Claude app (copy prompt → paste reply) -->
   <dialog id="aiSheet" class="sheet">
     <div class="sheet-head">
-      <div class="title grow">Photo / AI estimate</div>
+      <div class="title grow">Photo → Claude</div>
       <button class="icon-btn" data-close aria-label="Close">✕</button>
     </div>
     <div class="seg" id="aiMode">
       <button data-mode="meal" class="on">Meal / plate</button>
       <button data-mode="label">Nutrition label</button>
     </div>
-    <label class="photo-pick" id="aiPick">
-      <input id="aiFile" type="file" accept="image/*" hidden>
-      <img id="aiPreview" alt="" hidden>
-      <span id="aiPickText">Tap to take or choose a photo<br><span class="muted small">(optional for meals: you can just describe it)</span></span>
-    </label>
+    <div class="step"><b>1</b><span id="aiStep1Text">Say what's in it (optional), then copy the prompt.</span></div>
     <label class="field" id="aiNoteWrap">
-      <span>What's in it? Give weights/counts you know</span>
-      <textarea id="aiNote" rows="3" placeholder="e.g. 180g cooked rice, 2 chicken thighs, 3 tenderstem broccoli, some furikake"></textarea>
+      <textarea id="aiNote" rows="2" placeholder="e.g. 180g cooked rice, 2 chicken thighs, 3 tenderstem broccoli, some furikake"></textarea>
     </label>
-    <button class="btn primary full" id="aiGo">Analyze</button>
+    <div class="row tight">
+      <button class="btn primary grow" id="aiCopy">Copy prompt</button>
+      <a class="btn" id="aiOpenClaude" href="https://claude.ai/new" target="_blank" rel="noopener">Open Claude ↗</a>
+    </div>
+    <textarea id="aiPromptFallback" rows="5" readonly hidden></textarea>
+    <div class="step"><b>2</b><span>In Claude: attach your photo, paste the prompt, send.</span></div>
+    <div class="step"><b>3</b><span>Copy Claude's whole reply and paste it here.</span></div>
+    <textarea id="aiReply" rows="3" placeholder="Paste Claude's reply here"></textarea>
+    <div class="row tight">
+      <button class="btn" id="aiPasteBtn">Paste</button>
+      <button class="btn primary grow" id="aiGo">Read reply</button>
+    </div>
     <div id="aiStatus" class="muted small center"></div>
     <div id="aiResults"></div>
   </dialog>
@@ -212,10 +218,6 @@
       <span class="muted small grow" id="syncInfo"></span>
       <button class="btn" id="syncNowBtn">Sync now</button>
     </div>
-
-    <h3>AI photo estimates (Claude)</h3>
-    <p class="muted small">Needs an Anthropic API key from platform.claude.com (pay-as-you-go, roughly 1–3¢ per photo). Stored on this device only.</p>
-    <label class="field"><span>Anthropic API key</span><input id="sAiKey" type="password" autocomplete="off"></label>
 
     <h3>Backup</h3>
     <div class="row">

@@ -4,7 +4,7 @@ A personal calorie and macro tracker (calories, protein, carbs, fat and sodium).
 
 - **Barcode scanning.** Uses the phone camera and looks products up in [Open Food Facts](https://world.openfoodfacts.org) (free). Anything it can't find, you add once and it's remembered.
 - **Food library.** Includes ~45 built-in basics (rice, chicken, eggs…), plus anything you've scanned or typed in, sorted by most recent.
-- **Photo / AI.** Snap a plate, optionally say "180g cooked rice, 2 chicken thighs…", and Claude splits it into items with grams and macros that you can edit before adding. It can also read a nutrition-label photo straight into a new food.
+- **Photo → Claude (free, no API key).** Tap *Copy prompt* and add a note like "180g cooked rice, 2 chicken thighs…". In the Claude app, attach the photo and paste the prompt. Then paste Claude's reply back into the tracker. It becomes an editable list of items with grams and macros. The same flow turns a nutrition-label photo into a new food. This uses your normal Claude plan.
 - **Sync** between iPhone and computer. Your log is stored as `data.json` in a private GitHub repo.
 
 ## Setup
@@ -23,10 +23,7 @@ After a minute the site is at `https://<your-username>.github.io/<repo-name>/`.
 
 The token is stored only in that browser. It's never written to the data file.
 
-### 3. AI photo estimates (optional)
-Get an API key at [platform.claude.com](https://platform.claude.com) (pay-as-you-go; one photo costs a few cents) and paste it in **⚙ Settings**. It's stored only on that device.
-
-### 4. On iPhone
+### 3. On iPhone
 Open the site in Safari → Share → **Add to Home Screen**. It then opens full-screen like an app.
 This also stops Safari from clearing the site's storage after a week of not using it. Sync protects you either way.
 
@@ -34,4 +31,4 @@ This also stops Safari from clearing the site's storage after a week of not usin
 - The coloured dot in the top bar shows sync status: green = synced, yellow = syncing, red = problem (tap ⚙ to see why).
 - Tap any logged item to change grams, meal or date, or to delete it.
 - Drinks: enter ml as grams (close enough for most drinks).
-- AI estimates are marked "est.". Weights you give it are used exactly; portions it guesses from the photo are usually within ±20–30%.
+- Items Claude estimated are marked "est.". Weights you give it are used exactly; portions it guesses from the photo are usually within ±20–30%.

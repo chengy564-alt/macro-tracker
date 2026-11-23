@@ -3,9 +3,7 @@
 
 import { GENERIC_FOODS } from "./foods.js";
 
-const ANTHROPIC_SDK_URL = "https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.6.0/+esm";
 const BARCODE_PONYFILL_URL = "https://cdn.jsdelivr.net/npm/barcode-detector@3.2.3/ponyfill/+esm";
-const CLAUDE_MODEL = "claude-opus-5-5";
 
 const DATA_KEY = "mt-data-v1";
 const SECRET_KEY = "mt-secrets-v1";
@@ -600,153 +598,143 @@ async function handleBarcode(code) {
 }
 let lastNotFoundDraft = {};
 
-// ---------- AI (Claude) ----------
-let aiMode = "meal", aiImage = null, aiTarget = null; // aiTarget: 'food-editor' when filling a label
-let sdkPromise = null;
-function loadSdk() {
-  sdkPromise ??= import(ANTHROPIC_SDK_URL).then((m) => m.default || m.Anthropic);
-  return sdkPromise;
-}
-const NUTRI_PROPS = {
-  kcal: { type: "number" }, protein_g: { type: "number" }, carbs_g: { type: "number" }, fat_g: { type: "number" }, sodium_mg: { type: "number" },
-};
-const MEAL_SCHEMA = {
-  type: "object", additionalProperties: false, required: ["items", "summary"],
-  properties: {
-    summary: { type: "string" },
-    items: {
-      type: "array",
-      items: {
-        type: "object", additionalProperties: false,
-        required: ["name", "grams", "basis", "note", ...Object.keys(NUTRI_PROPS)],
-        properties: { name: { type: "string" }, grams: { type: "number" }, basis: { type: "string", enum: ["given", "estimated"] }, note: { type: "string" }, ...NUTRI_PROPS },
-      },
-    },
-  },
-};
-const LABEL_SCHEMA = {
-  type: "object", additionalProperties: false,
-  required: ["name", "brand", "serving_label", "serving_grams", "note", ...Object.keys(NUTRI_PROPS)],
-  properties: { name: { type: "string" }, brand: { type: "string" }, serving_label: { type: "string" }, serving_grams: { type: "number" }, note: { type: "string" }, ...NUTRI_PROPS },
-};
-const AI_SYSTEM = `You estimate nutrition for a personal macro tracker. Use standard nutrition references (USDA-style values).
-Numbers: kcal, protein_g, carbs_g, fat_g, sodium_mg.
-- When the user states a weight or count for an item, use it exactly and mark basis "given". Otherwise estimate the portion from the photo (plate size, utensils, hands, packaging) and mark basis "estimated".
-- Weights are as eaten: cooked weight for cooked food, edible portion only (no bones).
-- List each component separately, including oils, sauces, seasonings and toppings you can see or that are mentioned. Don't drop small items.
-- Be realistic rather than conservative. Keep "note" short (e.g. "2 medium boneless thighs ≈ 220g").`;
+// ---------- Photo → Claude app (copy prompt, paste reply back). Free: uses your Claude plan, no API key. ----------
+let aiMode = "meal", aiTarget = null; // aiTarget: 'food-editor' | 'barcode' when filling a label
 
-async function fileToJpegB64(file, max = 1280) {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = new Image();
-    img.src = url;
-    await img.decode();
-    const s = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
-    const c = document.createElement("canvas");
-    c.width = Math.round(img.naturalWidth * s);
-    c.height = Math.round(img.naturalHeight * s);
-    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-    return c.toDataURL("image/jpeg", 0.85).split(",")[1];
-  } finally {
-    URL.revokeObjectURL(url);
+const RULES = `Rules:
+- Use standard nutrition references (USDA-style values). Be realistic, not conservative.
+- If I gave a weight or count for something, use it exactly. Otherwise estimate the portion from the photo (plate size, utensils, hands, packaging).
+- Weights are as eaten: cooked weight for cooked food, edible part only (no bones).`;
+
+function buildPrompt(mode, note) {
+  if (mode === "label") {
+    return `Read the nutrition label / packaging in the attached photo for my macro tracker.
+${note ? `Extra info: ${note}\n` : ""}
+Give values PER 100 g (or per 100 ml for drinks). If the label only shows per-serving values, convert using the serving size. If no label is visible, use your best knowledge of this exact product and say so in "note". Use 0 for anything genuinely unknown.
+
+Reply with ONLY this JSON in a code block, filled in, nothing else:
+\`\`\`json
+{"type":"label","name":"","brand":"","serving_label":"","serving_grams":0,"kcal":0,"protein_g":0,"carbs_g":0,"fat_g":0,"sodium_mg":0,"note":""}
+\`\`\``;
   }
+  return `Estimate the nutrition of my meal for my macro tracker (photo attached; if there's no photo, go by my description).
+What I ate / weights I know: ${note || "(nothing extra, judge from the photo)"}
+
+${RULES}
+- List each component as its own item, including oils, sauces, seasonings and toppings. Don't drop small items.
+- "basis" is "given" if I stated the amount, otherwise "estimated". Keep "note" short, e.g. "2 medium boneless thighs ≈ 220g".
+
+Reply with ONLY this JSON in a code block, filled in, nothing else:
+\`\`\`json
+{"type":"meal","summary":"","items":[{"name":"","grams":0,"kcal":0,"protein_g":0,"carbs_g":0,"fat_g":0,"sodium_mg":0,"basis":"estimated","note":""}]}
+\`\`\``;
 }
-async function askClaude(mode, imageB64, note) {
-  const key = secrets().aiKey;
-  if (!key) throw new Error("Add your Anthropic API key in Settings first.");
-  const Anthropic = await loadSdk();
-  const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
-  const content = [];
-  if (imageB64) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: imageB64 } });
-  content.push({
-    type: "text",
-    text: mode === "label"
-      ? `Read the nutrition label / packaging${imageB64 ? " in this photo" : ""}. Return values PER 100 g (or per 100 ml for drinks). If the label only lists per-serving values, convert using the serving size in grams/ml. If there's no label visible, use your best knowledge of this exact product and say so in note. Use 0 for serving_grams if unknown and 0 for any value that is genuinely absent.${note ? `\nExtra info from me: ${note}` : ""}`
-      : `Break this meal into items and estimate nutrition for each.${note ? `\nWhat I ate / weights I know: ${note}` : ""}`,
-  });
-  try {
-    const response = await client.beta.messages.create({
-      model: CLAUDE_MODEL,
-      max_tokens: 16000,
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      system: AI_SYSTEM,
-      output_config: { effort: "medium", format: { type: "json_schema", schema: mode === "label" ? LABEL_SCHEMA : MEAL_SCHEMA } },
-      messages: [{ role: "user", content }],
-    });
-    if (response.stop_reason === "refusal") throw new Error("Claude declined to analyze this. Try a different photo or describe it.");
-    if (response.stop_reason === "max_tokens") throw new Error("The answer was cut off. Try again.");
-    const text = response.content.find((b) => b.type === "text")?.text;
-    if (!text) throw new Error("Empty answer from Claude.");
-    return JSON.parse(text);
-  } catch (e) {
-    if (e instanceof Anthropic.AuthenticationError) throw new Error("Anthropic API key was rejected. Check it in Settings.");
-    if (e instanceof Anthropic.PermissionDeniedError) throw new Error("This API key isn't allowed to use that model.");
-    if (e instanceof Anthropic.RateLimitError) throw new Error("Rate limited or out of credit. Check your Anthropic billing.");
-    if (e instanceof Anthropic.BadRequestError) throw new Error(`Request rejected: ${e.message}`);
-    if (e instanceof Anthropic.APIConnectionError) throw new Error("Couldn't reach Anthropic. Check your connection.");
-    if (e instanceof Anthropic.APIError) throw new Error(`Anthropic error ${e.status ?? ""}: ${e.message}`);
-    throw e;
+
+// Pull the first complete JSON object out of Claude's reply (it may be wrapped in ``` fences or text).
+function extractJson(text) {
+  const t = text.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+  for (let start = t.indexOf("{"); start !== -1; start = t.indexOf("{", start + 1)) {
+    let depth = 0, inStr = false, escp = false;
+    for (let i = start; i < t.length; i++) {
+      const ch = t[i];
+      if (inStr) {
+        if (escp) escp = false;
+        else if (ch === "\\") escp = true;
+        else if (ch === '"') inStr = false;
+      } else if (ch === '"') inStr = true;
+      else if (ch === "{") depth++;
+      else if (ch === "}" && --depth === 0) {
+        try { return JSON.parse(t.slice(start, i + 1)); } catch { break; }
+      }
+    }
   }
+  return null;
 }
+const nn = (v) => { const x = num(v); return x != null && x >= 0 ? x : 0; };
+
 function setAiMode(m) {
   aiMode = m;
   for (const b of $("#aiMode").children) b.classList.toggle("on", b.dataset.mode === m);
   $("#aiNote").placeholder = m === "label"
     ? "Optional: product name, or anything the photo doesn't show"
     : "e.g. 180g cooked rice, 2 chicken thighs, 3 tenderstem broccoli, some furikake";
+  $("#aiStep1Text").textContent = m === "label"
+    ? "Optional note, then copy the prompt."
+    : "Say what's in it (weights you know help), then copy the prompt.";
   $("#aiResults").innerHTML = "";
   $("#aiStatus").textContent = "";
+  $("#aiPromptFallback").hidden = true;
 }
 function openAi(mode = "meal", target = null) {
   aiTarget = target;
-  aiImage = null;
-  $("#aiFile").value = "";
-  $("#aiPreview").hidden = true;
-  $("#aiPickText").hidden = false;
   $("#aiNote").value = "";
+  $("#aiReply").value = "";
   setAiMode(mode);
   $("#aiMode").hidden = !!target;
   openSheet("#aiSheet");
 }
-let aiItems = [];
-async function runAi() {
-  if (aiMode === "label" && !aiImage && !$("#aiNote").value.trim()) { toast("Add a photo of the label"); return; }
-  if (aiMode === "meal" && !aiImage && !$("#aiNote").value.trim()) { toast("Add a photo or describe what you ate"); return; }
-  const btn = $("#aiGo");
-  btn.disabled = true;
-  $("#aiResults").innerHTML = "";
-  $("#aiStatus").innerHTML = `<span class="spinner"></span>Claude is looking… (10–30s)`;
+async function copyPrompt() {
+  const prompt = buildPrompt(aiMode, $("#aiNote").value.trim());
   try {
-    const out = await askClaude(aiMode, aiImage, $("#aiNote").value.trim());
-    $("#aiStatus").textContent = "";
-    if (aiMode === "label") {
-      const per100 = { kcal: out.kcal, p: out.protein_g, c: out.carbs_g, f: out.fat_g, na: out.sodium_mg };
-      const draft = {
-        ...(aiTarget === "food-editor" ? currentEditorDraft() : {}),
-        name: out.name, brand: out.brand, per100,
-        serving: out.serving_grams > 0 ? { label: out.serving_label || "serving", grams: out.serving_grams } : null,
-      };
-      if (!draft.barcode && lastBarcode && aiTarget === "barcode") draft.barcode = lastBarcode;
-      closeSheet("#aiSheet");
-      openFoodEditor(draft, { then: "amount" });
-      if (out.note) toast(out.note, 4000);
-    } else {
-      aiItems = out.items.map((it) => {
-        const g = it.grams > 0 ? it.grams : 100;
-        return {
-          use: true, name: it.name, grams: g, basis: it.basis, note: it.note,
-          per100: { kcal: (it.kcal * 100) / g, p: (it.protein_g * 100) / g, c: (it.carbs_g * 100) / g, f: (it.fat_g * 100) / g, na: (it.sodium_mg * 100) / g },
-        };
-      });
-      renderAiItems(out.summary);
-    }
-  } catch (e) {
-    $("#aiStatus").textContent = e.message || String(e);
-  } finally {
-    btn.disabled = false;
+    await navigator.clipboard.writeText(prompt);
+    $("#aiPromptFallback").hidden = true;
+    toast("Prompt copied. Now open Claude, attach the photo and paste.");
+  } catch {
+    const fb = $("#aiPromptFallback");
+    fb.value = prompt;
+    fb.hidden = false;
+    fb.focus();
+    fb.select();
+    toast("Copy the prompt from the box below");
   }
+}
+async function pasteReply() {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text) { $("#aiReply").value = text; readReply(); }
+  } catch {
+    toast("Long-press the box and choose Paste");
+    $("#aiReply").focus();
+  }
+}
+let aiItems = [];
+function readReply() {
+  const raw = $("#aiReply").value.trim();
+  if (!raw) { toast("Paste Claude's reply first"); return; }
+  const out = extractJson(raw);
+  if (!out) {
+    $("#aiStatus").textContent = "Couldn't find the data in that reply. Make sure you copied Claude's whole answer (the part with { … }).";
+    return;
+  }
+  $("#aiStatus").textContent = "";
+  const isMeal = Array.isArray(out.items);
+  if (!isMeal && aiMode === "meal" && out.kcal == null) {
+    $("#aiStatus").textContent = "That reply doesn't look like meal data. Try again.";
+    return;
+  }
+  if (!isMeal) {
+    const per100 = { kcal: nn(out.kcal), p: nn(out.protein_g), c: nn(out.carbs_g), f: nn(out.fat_g), na: nn(out.sodium_mg) };
+    const sg = nn(out.serving_grams);
+    const draft = {
+      ...(aiTarget === "food-editor" ? currentEditorDraft() : {}),
+      name: out.name || "", brand: out.brand || "", per100,
+      serving: sg > 0 ? { label: out.serving_label || "serving", grams: sg } : null,
+    };
+    if (!draft.barcode && lastBarcode && aiTarget === "barcode") draft.barcode = lastBarcode;
+    closeSheet("#aiSheet");
+    openFoodEditor(draft, { then: "amount" });
+    toast(out.note ? `Check the numbers, then save. ${out.note}` : "Check the numbers, then save", 4000);
+    return;
+  }
+  aiItems = out.items.filter((it) => it && it.name).map((it) => {
+    const g = nn(it.grams) || 100;
+    return {
+      use: true, name: String(it.name), grams: g, basis: it.basis === "given" ? "given" : "estimated", note: it.note || "",
+      per100: { kcal: (nn(it.kcal) * 100) / g, p: (nn(it.protein_g) * 100) / g, c: (nn(it.carbs_g) * 100) / g, f: (nn(it.fat_g) * 100) / g, na: (nn(it.sodium_mg) * 100) / g },
+    };
+  });
+  if (!aiItems.length) { $("#aiStatus").textContent = "No food items in that reply."; return; }
+  renderAiItems(out.summary);
 }
 function renderAiItems(summary) {
   const tot = sum(aiItems.filter((i) => i.use).map((i) => ({ n: scale(i.per100, i.grams) })));
@@ -762,6 +750,7 @@ function renderAiItems(summary) {
     <div class="row"><select id="aiMeal" class="grow"></select><button class="btn primary" id="aiAdd">Add to log</button></div>`;
   mealOptions($("#aiMeal"));
   $("#aiMeal").value = addMeal;
+  $("#aiResults").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 function addAiItems() {
   const meal = $("#aiMeal").value;
@@ -805,7 +794,7 @@ function renderHistory() {
 function openSettings() {
   const t = db.settings.targets, s = secrets();
   $("#tKcal").value = t.kcal ?? ""; $("#tP").value = t.p ?? ""; $("#tC").value = t.c ?? ""; $("#tF").value = t.f ?? ""; $("#tNa").value = t.na ?? "";
-  $("#sOwner").value = s.ghOwner || ""; $("#sRepo").value = s.ghRepo || ""; $("#sToken").value = s.ghToken || ""; $("#sAiKey").value = s.aiKey || "";
+  $("#sOwner").value = s.ghOwner || ""; $("#sRepo").value = s.ghRepo || ""; $("#sToken").value = s.ghToken || "";
   $("#syncInfo").textContent = syncConfigured() ? lastSyncMsg : "Not set up";
   openSheet("#settingsSheet");
 }
@@ -817,7 +806,7 @@ function saveSettings() {
   const before = JSON.stringify(secrets());
   setSecrets({
     ...secrets(),
-    ghOwner: $("#sOwner").value.trim(), ghRepo: $("#sRepo").value.trim(), ghToken: $("#sToken").value.trim(), aiKey: $("#sAiKey").value.trim(),
+    ghOwner: $("#sOwner").value.trim(), ghRepo: $("#sRepo").value.trim(), ghToken: $("#sToken").value.trim(),
   });
   save();
   render();
@@ -911,17 +900,10 @@ $("#nfPhoto").onclick = () => { closeSheet("#scanSheet"); openAi("label", "barco
 $("#nfManual").onclick = () => { closeSheet("#scanSheet"); openFoodEditor({ ...lastNotFoundDraft }); };
 
 $("#aiMode").onclick = (e) => { const b = e.target.closest("[data-mode]"); if (b) setAiMode(b.dataset.mode); };
-$("#aiFile").onchange = async (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-  try {
-    aiImage = await fileToJpegB64(file);
-    $("#aiPreview").src = "data:image/jpeg;base64," + aiImage;
-    $("#aiPreview").hidden = false;
-    $("#aiPickText").hidden = true;
-  } catch { toast("Couldn't read that image"); }
-};
-$("#aiGo").onclick = runAi;
+$("#aiCopy").onclick = copyPrompt;
+$("#aiPasteBtn").onclick = pasteReply;
+$("#aiGo").onclick = readReply;
+$("#aiReply").addEventListener("paste", () => setTimeout(readReply, 50));
 $("#aiResults").addEventListener("input", (e) => {
   const g = e.target.dataset.aiG;
   if (g != null) { aiItems[+g].grams = num(e.target.value) || 0; refreshAiRow(); }
