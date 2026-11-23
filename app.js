@@ -1,9 +1,9 @@
 // Macro Log: a personal food/macro tracker. Static site, no server.
 // Data lives in localStorage and (optionally) syncs to a private GitHub repo.
 
-import { GENERIC_FOODS } from "./foods.js";
-import { computeGame, questsFor, autoJunk, isJunkName, XP } from "./game.js";
-import { emblemSVG, rankFor, TIERS, firstLevelOfTier } from "./ranks.js";
+import { GENERIC_FOODS } from "./foods.js?v=5";
+import { computeGame, questsFor, autoJunk, isJunkName, XP } from "./game.js?v=5";
+import { emblemSVG, rankFor, TIERS, firstLevelOfTier } from "./ranks.js?v=5";
 
 const BARCODE_PONYFILL_URL = "https://cdn.jsdelivr.net/npm/barcode-detector@3.2.3/ponyfill/+esm";
 
