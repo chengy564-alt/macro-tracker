@@ -334,6 +334,85 @@ dialog.alert .btn { min-width: 120px; }
 .rung.reached { color: var(--text); }
 .rung.current { background: var(--bg); outline: 1px solid var(--line); font-weight: 700; }
 
+/* ---------- week strip ---------- */
+.week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.wd { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.wd-l { font-size: 11px; color: var(--muted); font-weight: 600; }
+.wd-dot {
+  width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 800; background: var(--track); color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.wd.future .wd-dot, .wd.none .wd-dot { background: transparent; border: 1.5px dashed var(--line); }
+.wd.good .wd-dot { background: color-mix(in srgb, var(--lime) 22%, transparent); color: var(--lime); }
+.wd.perfect .wd-dot { background: var(--lime); color: var(--accent-text); box-shadow: 0 0 12px color-mix(in srgb, var(--lime) 45%, transparent); }
+.wd.bad .wd-dot { background: color-mix(in srgb, var(--danger) 22%, transparent); color: var(--danger); }
+.wd.missed .wd-dot { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.wd.today .wd-dot { border: 2px solid var(--text); background: transparent; color: var(--text); font-size: 10px; }
+.wd.today.good .wd-dot { border-color: var(--lime); color: var(--lime); }
+.wd.today.bad .wd-dot { border-color: var(--danger); color: var(--danger); }
+.wd.today .wd-l { color: var(--text); }
+
+/* ---------- hero (calorie ring) ---------- */
+.hero { display: flex; align-items: center; gap: 18px; }
+.kring { position: relative; width: 128px; height: 128px; flex: none; }
+.kring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.kring circle { fill: none; stroke-width: 10; }
+.kr-bg { stroke: var(--track); }
+.kr-fg { stroke: var(--lime); stroke-linecap: round; transition: stroke-dashoffset .7s cubic-bezier(.2,.8,.2,1); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--lime) 35%, transparent)); }
+.kring.over .kr-fg { stroke: var(--danger); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--danger) 40%, transparent)); }
+.kr-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.kr-center b { font-size: 30px; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
+.kr-center span { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.kring.over .kr-center b { color: var(--danger); }
+.hero-side { flex: 1; min-width: 0; display: grid; gap: 10px; }
+.eaten { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; }
+.eaten b { font-size: 17px; }
+.mtop { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+.mtop b { font-weight: 700; }
+.mbar { height: 6px; border-radius: 99px; background: var(--track); overflow: hidden; }
+.mbar > i { display: block; height: 100%; border-radius: 99px; transition: width .6s cubic-bezier(.2,.8,.2,1); }
+.hero-foot { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); text-align: center; }
+
+/* ---------- meals timeline ---------- */
+.card.timeline { padding: 6px 16px; }
+.meal { display: flex; gap: 14px; position: relative; padding: 14px 0; }
+.meal + .meal { border-top: 1px solid var(--line); }
+.meal-rail { flex: none; display: flex; flex-direction: column; align-items: center; }
+.meal-icon {
+  width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+  background: var(--bg); border: 1px solid var(--line); color: var(--muted);
+}
+.meal-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.meal.has .meal-icon { color: var(--lime); border-color: color-mix(in srgb, var(--lime) 40%, var(--line)); }
+.meal.now .meal-icon { color: var(--accent-text); background: var(--lime); border-color: var(--lime); box-shadow: 0 0 16px color-mix(in srgb, var(--lime) 40%, transparent); }
+.meal-body { flex: 1; min-width: 0; }
+.meal-top { display: flex; align-items: center; gap: 8px; }
+.meal-name { font-weight: 700; font-size: 16px; }
+.now-pill { font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--lime); border: 1px solid var(--lime); border-radius: 99px; padding: 1px 7px; }
+.meal-kcal { margin-left: auto; font-size: 13px; }
+.meal-kcal b { font-size: 15px; }
+.meal-bar { display: flex; height: 5px; border-radius: 99px; background: var(--track); overflow: hidden; margin: 8px 0 4px; }
+.meal-bar > i { display: block; height: 100%; }
+.food { display: flex; align-items: center; gap: 10px; padding: 9px 0; cursor: pointer; border-radius: 10px; }
+.food:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.avatar {
+  flex: none; width: 32px; height: 32px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+  background: var(--bg); border: 1px solid var(--line); font-weight: 800; font-size: 13px; color: var(--muted);
+}
+.food .name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.food .sub { font-size: 12px; color: var(--muted); }
+.food .kcal { font-weight: 700; font-size: 14px; }
+.food.junk .avatar { border-color: var(--danger); color: var(--danger); }
+.log-cta {
+  width: 100%; margin-top: 8px; display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 14px; border-radius: 12px; border: 1.5px dashed var(--line); background: none; color: var(--text);
+  font-weight: 600; font-size: 14px; cursor: pointer;
+}
+.log-cta:hover { border-color: var(--lime); }
+.meal.now .log-cta { border-style: solid; border-color: color-mix(in srgb, var(--lime) 55%, var(--line)); background: color-mix(in srgb, var(--lime) 7%, transparent); }
+.cta-lp { font-size: 12px; font-weight: 800; color: var(--lime); }
+.add-more { background: none; border: 0; color: var(--lime); font-weight: 650; font-size: 13px; padding: 6px 0 0; cursor: pointer; }
+
 /* ---------- header dropdown (what's left today) ---------- */
 .menu-anchor { position: relative; }
 #questBtn { position: relative; }

@@ -1,9 +1,9 @@
 // Macro Log: a personal food/macro tracker. Static site, no server.
 // Data lives in localStorage and (optionally) syncs to a private GitHub repo.
 
-import { GENERIC_FOODS } from "./foods.js?v=5";
-import { computeGame, questsFor, autoJunk, isJunkName, XP } from "./game.js?v=5";
-import { emblemSVG, rankFor, TIERS, firstLevelOfTier } from "./ranks.js?v=5";
+import { GENERIC_FOODS } from "./foods.js?v=6";
+import { computeGame, questsFor, autoJunk, isJunkName, XP } from "./game.js?v=6";
+import { emblemSVG, rankFor, TIERS, firstLevelOfTier } from "./ranks.js?v=6";
 
 const BARCODE_PONYFILL_URL = "https://cdn.jsdelivr.net/npm/barcode-detector@3.2.3/ponyfill/+esm";
 
@@ -240,34 +240,74 @@ let curDate = localDate();
 function dayEntries(date) {
   return live("entries").filter((e) => e.date === date).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
 }
+// How the day's calories are split across meals (for per-meal budgets).
+const MEAL_SPLIT = { breakfast: 0.25, lunch: 0.35, dinner: 0.3, snacks: 0.1 };
+const MEAL_ICON = {
+  breakfast: '<path d="M3 18h18M6 18a6 6 0 0 1 12 0M12 6V3M4.9 10.9 3.5 9.5M19.1 10.9l1.4-1.4M7 21h10"/>',
+  lunch: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  dinner: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+  snacks: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
+};
 function render() {
   $("#dateLabel").textContent = prettyDate(curDate);
   const list = dayEntries(curDate);
   const tot = sum(list);
   const t = db.settings.targets;
   const left = (t.kcal || 0) - tot.kcal;
-  const bar = (k) => {
+  const over = left < 0;
+
+  // Hero: calorie ring + macro bars
+  const R = 52, C = 2 * Math.PI * R;
+  const frac = t.kcal ? Math.min(1, tot.kcal / t.kcal) : 0;
+  const macro = (k, label) => {
     const pct = t[k] ? Math.min(100, (tot[k] / t[k]) * 100) : 0;
-    const over = t[k] && tot[k] > t[k];
-    return `<div class="bar-row"><span>${NLABEL[k]}</span><div class="bar${over ? " over" : ""}"><i style="width:${pct}%;background:var(--${k})"></i></div>
-      <span class="num">${r0(tot[k])}${t[k] ? ` / ${r0(t[k])}` : ""}${NUNIT[k]}</span></div>`;
+    return `<div class="mrow"><div class="mtop"><span>${label}</span><span class="num"><b>${r0(tot[k])}</b><span class="muted">/${r0(t[k])}${NUNIT[k]}</span></span></div>
+      <div class="mbar"><i style="width:${pct}%;background:var(--${k})"></i></div></div>`;
   };
   $("#summary").innerHTML = `
-    <div class="big"><b>${r0(tot.kcal)}</b><span class="muted">of ${r0(t.kcal)} kcal · ${left >= 0 ? `${r0(left)} left` : `${r0(-left)} over`}</span></div>
-    <div class="bars">${bar("kcal")}${bar("p")}${bar("c")}${bar("f")}${bar("na")}</div>`;
+    <div class="hero">
+      <div class="kring${over ? " over" : ""}">
+        <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="${R}" class="kr-bg"/>
+          <circle cx="60" cy="60" r="${R}" class="kr-fg" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - frac)}"/></svg>
+        <div class="kr-center"><b class="num">${r0(Math.abs(left)).toLocaleString()}</b><span>${over ? "kcal over" : "kcal left"}</span></div>
+      </div>
+      <div class="hero-side">
+        <div class="eaten"><span class="num"><b>${r0(tot.kcal).toLocaleString()}</b> eaten</span><span class="muted num">${r0(t.kcal).toLocaleString()} goal</span></div>
+        ${macro("p", "Protein")}${macro("c", "Carbs")}${macro("f", "Fat")}
+      </div>
+    </div>
+    <div class="hero-foot muted small num">Sodium ${r0(tot.na).toLocaleString()} / ${r0(t.na).toLocaleString()} mg</div>`;
 
-  $("#meals").innerHTML = MEALS.map(([key, label]) => {
+  // Meals timeline
+  const isToday = curDate === localDate();
+  const nowMeal = isToday ? guessMeal() : null;
+  $("#meals").innerHTML = `<section class="card timeline">${MEALS.map(([key, label]) => {
     const es = list.filter((e) => e.meal === key);
     const st = sum(es);
-    return `<section class="card">
-      <div class="meal-head"><h2>${label}</h2>${es.length ? `<span class="muted">${r0(st.kcal)} kcal · P ${r0(st.p)} · C ${r0(st.c)} · F ${r0(st.f)}</span>` : ""}
-        <button class="add-link" data-add="${key}">+ Add</button></div>
-      ${es.length ? es.map((e) => `<div class="entry${e.junk ? " junk" : ""}" data-entry="${e.id}">
-          <div class="grow"><div class="name">${e.junk ? "🍔 " : ""}${esc(e.name)}</div>
-          <div class="sub">${r0(e.grams)} g · P ${r1(e.n.p)} · C ${r1(e.n.c)} · F ${r1(e.n.f)}${e.n.na ? ` · Na ${r0(e.n.na)}mg` : ""}${e.estimated ? " · est." : ""}</div></div>
-          <div class="kcal">${r0(e.n.kcal)}</div></div>`).join("") : `<div class="empty">Nothing logged</div>`}
-    </section>`;
-  }).join("");
+    const budget = Math.round(t.kcal * MEAL_SPLIT[key]);
+    const kc = (g) => (budget ? Math.min(100, (g / budget) * 100) : 0);
+    const segs = [["p", st.p * 4], ["c", st.c * 4], ["f", st.f * 9]];
+    const mealOver = st.kcal > budget * 1.15;
+    const lp = key === "snacks" ? "" : `<span class="cta-lp">+${XP.meal} LP</span>`;
+    return `<div class="meal${es.length ? " has" : ""}${key === nowMeal ? " now" : ""}">
+      <div class="meal-rail"><div class="meal-icon"><svg viewBox="0 0 24 24">${MEAL_ICON[key]}</svg></div></div>
+      <div class="meal-body">
+        <div class="meal-top">
+          <span class="meal-name">${label}</span>${key === nowMeal ? '<span class="now-pill">Now</span>' : ""}
+          <span class="meal-kcal num${mealOver ? " danger-text" : ""}"><b>${r0(st.kcal)}</b><span class="muted"> / ${budget}</span></span>
+        </div>
+        <div class="meal-bar">${segs.map(([k, v]) => `<i style="width:${kc(v)}%;background:var(--${k})"></i>`).join("")}</div>
+        ${es.map((e) => `<div class="food${e.junk ? " junk" : ""}" data-entry="${e.id}">
+            <span class="avatar">${esc((e.name.match(/[A-Za-z0-9]/) || ["•"])[0].toUpperCase())}</span>
+            <div class="grow"><div class="name">${esc(e.name)}${e.junk ? ' <span class="pill bad">junk</span>' : ""}</div>
+            <div class="sub num">${r0(e.grams)}g · <span style="color:var(--p)">P ${r0(e.n.p)}</span> · C ${r0(e.n.c)} · F ${r0(e.n.f)}${e.estimated ? " · est." : ""}</div></div>
+            <div class="kcal num">${r0(e.n.kcal)}</div></div>`).join("")}
+        ${es.length
+          ? `<button class="add-more" data-add="${key}">+ Add to ${label.toLowerCase()}</button>`
+          : `<button class="log-cta" data-add="${key}"><span>+ Log ${label.toLowerCase()}</span>${lp}</button>`}
+      </div>
+    </div>`;
+  }).join("")}</section>`;
   renderGame();
 }
 
@@ -296,7 +336,8 @@ function renderGame() {
         <svg viewBox="0 0 24 24" class="flame"><path d="M12 2c1 3.5 4.5 5.6 4.5 10a4.5 4.5 0 0 1-9 0c0-2 .8-3.3 1.8-4.5.2 1.7 1 2.7 2.2 3.2C11 8 11 5 12 2z"/></svg>
         <b>${game.streak}</b><span class="muted small">streak</span>
       </div>
-    </div>`;
+    </div>
+    ${weekStrip(today)}`;
 
   // Banners (only on today's view)
   const banners = [];
@@ -332,6 +373,31 @@ function renderGame() {
       : `<div class="muted small">Before you started logging, so no score.</div>`;
   }
   checkProgressEvents();
+}
+
+// Mon–Sun dots: perfect / good / bad / missed / upcoming.
+function weekStrip(today) {
+  const [y, m, d] = today.split("-").map(Number);
+  const dow = (new Date(y, m - 1, d).getDay() + 6) % 7; // 0 = Monday
+  const monday = addDays(today, -dow);
+  const letters = ["M", "T", "W", "T", "F", "S", "S"];
+  const cells = letters.map((l, i) => {
+    const date = addDays(monday, i);
+    const info = game.days.get(date);
+    let cls = "future", mark = "";
+    if (date === today) {
+      cls = "today" + (info?.junk ? " bad" : info?.meals >= 2 ? " good" : "");
+      mark = info?.meals ? `${info.meals}/3` : "";
+    } else if (date < today) {
+      if (!info) cls = "none";
+      else if (info.perfect) { cls = "perfect"; mark = "★"; }
+      else if (!info.logged) { cls = "missed"; mark = "✕"; }
+      else if (info.xp < 0) { cls = "bad"; mark = "✕"; }
+      else { cls = "good"; mark = "✓"; }
+    }
+    return `<div class="wd ${cls}" title="${date}${info ? ` · ${xpStr(info.xp)} LP` : ""}"><span class="wd-l">${l}</span><span class="wd-dot">${mark}</span></div>`;
+  }).join("");
+  return `<div class="week">${cells}</div>`;
 }
 
 // Header dropdown: what's left to do today.
