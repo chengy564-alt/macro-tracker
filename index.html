@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Macro Log</title>
-  <meta name="theme-color" content="#0f1115">
+  <meta name="theme-color" content="#08090a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -21,12 +21,15 @@
     <button class="icon-btn" id="nextDay" aria-label="Next day">›</button>
     <span class="spacer"></span>
     <span class="sync-dot" id="syncDot" title="Sync status"></span>
-    <button class="icon-btn" id="openHistory" aria-label="History">▤</button>
+    <button class="icon-btn" id="openHistory" aria-label="Progress"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg></button>
     <button class="icon-btn" id="openSettings" aria-label="Settings">⚙</button>
   </header>
 
   <main id="main">
+    <section class="card game" id="gameCard" role="button" tabindex="0"></section>
+    <div id="banners"></div>
     <section class="card summary" id="summary"></section>
+    <section class="card quests" id="quests"></section>
     <div id="meals"></div>
   </main>
 
@@ -70,6 +73,7 @@
       <span>Meal</span>
       <select id="amtMeal"></select>
     </label>
+    <label class="check-row"><input type="checkbox" id="amtJunk"><span>Junk food <span class="muted small">(costs XP)</span></span></label>
     <label class="field" id="amtDateWrap">
       <span>Date</span>
       <input id="amtDate" type="date">
@@ -109,6 +113,7 @@
       <label class="field"><span>Fat g</span><input id="fF" type="number" inputmode="decimal" step="any"></label>
       <label class="field"><span>Sodium mg</span><input id="fNa" type="number" inputmode="decimal" step="any"></label>
     </div>
+    <label class="check-row"><input type="checkbox" id="fJunk"><span>Counts as junk food</span></label>
     <div class="row">
       <button class="btn danger" id="foodDelete" hidden>Delete food</button>
       <span class="spacer"></span>
@@ -183,13 +188,19 @@
     <div id="offResults" class="list"></div>
   </dialog>
 
-  <!-- History -->
-  <dialog id="historySheet" class="sheet">
+  <!-- Progress -->
+  <dialog id="progressSheet" class="sheet">
     <div class="sheet-head">
-      <div class="title grow">Last 14 days</div>
+      <div class="title grow">Progress</div>
       <button class="icon-btn" data-close aria-label="Close">✕</button>
     </div>
-    <div id="historyBody"></div>
+    <div id="progressBody"></div>
+  </dialog>
+
+  <!-- Alerts: level up/down, junk, badges -->
+  <dialog id="alertSheet" class="sheet alert">
+    <div id="alertBody"></div>
+    <div class="row end" id="alertButtons"></div>
   </dialog>
 
   <!-- Settings -->
@@ -205,6 +216,8 @@
       <label class="field"><span>Carbs g</span><input id="tC" type="number" inputmode="decimal"></label>
       <label class="field"><span>Fat g</span><input id="tF" type="number" inputmode="decimal"></label>
       <label class="field"><span>Sodium mg</span><input id="tNa" type="number" inputmode="decimal"></label>
+      <label class="field"><span>Maintenance kcal</span><input id="tMaint" type="number" inputmode="decimal"></label>
+      <label class="field"><span>Goal weight kg</span><input id="tGoal" type="number" inputmode="decimal" step="0.1"></label>
     </div>
 
     <h3>Sync between phone &amp; computer (GitHub)</h3>

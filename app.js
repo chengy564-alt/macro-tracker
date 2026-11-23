@@ -2,6 +2,7 @@
 // Data lives in localStorage and (optionally) syncs to a private GitHub repo.
 
 import { GENERIC_FOODS } from "./foods.js";
+import { computeGame, questsFor, autoJunk, isJunkName, XP } from "./game.js";
 
 const BARCODE_PONYFILL_URL = "https://cdn.jsdelivr.net/npm/barcode-detector@3.2.3/ponyfill/+esm";
 
@@ -70,15 +71,26 @@ function mealOptions(sel) {
 
 // ---------- storage ----------
 function emptyDb() {
-  return { foods: {}, entries: {}, settings: { targets: { kcal: 1872, p: 140, c: 164, f: 73, na: 2300 }, updatedAt: 0 } };
+  return {
+    foods: {}, entries: {}, weights: {},
+    settings: { targets: { kcal: 1872, p: 140, c: 164, f: 73, na: 2300 }, maintenance: 2372, goalKg: null, updatedAt: 0 },
+  };
+}
+function normalizeDb(d) {
+  const e = emptyDb();
+  const out = { ...e, ...d };
+  out.weights = out.weights || {};
+  out.settings = { ...e.settings, ...(d.settings || {}) };
+  return out;
 }
 function loadDb() {
   try {
     const d = JSON.parse(localStorage.getItem(DATA_KEY));
-    if (d && d.foods && d.entries) return { ...emptyDb(), ...d };
+    if (d && d.foods && d.entries) return normalizeDb(d);
   } catch {}
   return emptyDb();
 }
+const COLLS = ["foods", "entries", "weights"];
 let db = loadDb();
 function persist() {
   try { localStorage.setItem(DATA_KEY, JSON.stringify(db)); } catch { toast("Couldn't save on this device"); }
@@ -163,8 +175,8 @@ async function pullRemote() {
   return { data: JSON.parse(text), sha: j.sha };
 }
 function mergeDb(a, b) {
-  const out = { foods: {}, entries: {}, settings: a.settings };
-  for (const c of ["foods", "entries"]) {
+  const out = { foods: {}, entries: {}, weights: {}, settings: a.settings };
+  for (const c of COLLS) {
     out[c] = { ...(a[c] || {}) };
     for (const [id, r] of Object.entries(b?.[c] || {})) {
       const cur = out[c][id];
@@ -172,16 +184,16 @@ function mergeDb(a, b) {
     }
   }
   if ((b?.settings?.updatedAt || 0) > (a.settings?.updatedAt || 0)) out.settings = b.settings;
-  return out;
+  return normalizeDb(out);
 }
 function pruneTombstones(d) {
   const cutoff = Date.now() - 90 * 864e5;
-  for (const c of ["foods", "entries"]) for (const [id, r] of Object.entries(d[c])) if (r.deleted && r.updatedAt < cutoff) delete d[c][id];
+  for (const c of COLLS) for (const [id, r] of Object.entries(d[c] || {})) if (r.deleted && r.updatedAt < cutoff) delete d[c][id];
 }
 function sameAsRemote(local, remote) {
   if (!remote) return false;
-  for (const c of ["foods", "entries"]) {
-    const L = local[c], R = remote[c] || {};
+  for (const c of COLLS) {
+    const L = local[c] || {}, R = remote[c] || {};
     if (Object.keys(L).length !== Object.keys(R).length) return false;
     for (const id in L) if (!R[id] || R[id].updatedAt !== L[id].updatedAt) return false;
   }
@@ -249,12 +261,157 @@ function render() {
     return `<section class="card">
       <div class="meal-head"><h2>${label}</h2>${es.length ? `<span class="muted">${r0(st.kcal)} kcal · P ${r0(st.p)} · C ${r0(st.c)} · F ${r0(st.f)}</span>` : ""}
         <button class="add-link" data-add="${key}">+ Add</button></div>
-      ${es.length ? es.map((e) => `<div class="entry" data-entry="${e.id}">
-          <div class="grow"><div class="name">${esc(e.name)}</div>
+      ${es.length ? es.map((e) => `<div class="entry${e.junk ? " junk" : ""}" data-entry="${e.id}">
+          <div class="grow"><div class="name">${e.junk ? "🍔 " : ""}${esc(e.name)}</div>
           <div class="sub">${r0(e.grams)} g · P ${r1(e.n.p)} · C ${r1(e.n.c)} · F ${r1(e.n.f)}${e.n.na ? ` · Na ${r0(e.n.na)}mg` : ""}${e.estimated ? " · est." : ""}</div></div>
           <div class="kcal">${r0(e.n.kcal)}</div></div>`).join("") : `<div class="empty">Nothing logged</div>`}
     </section>`;
   }).join("");
+  renderGame();
+}
+
+// ---------- game UI ----------
+let game = null;
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const xpStr = (x) => (x > 0 ? `+${x}` : `${x}`);
+function renderGame() {
+  const today = localDate();
+  game = computeGame(db, today);
+  game.weighedToday = live("weights").some((w) => w.date === today);
+  const T = db.settings.targets;
+  const pct = Math.min(100, (game.into / game.need) * 100);
+  const atRisk = game.level > 1 && game.into < 30;
+  const R = 26, C = 2 * Math.PI * R;
+  $("#gameCard").innerHTML = `
+    <div class="lvl-row">
+      <div class="ring${atRisk ? " risk" : ""}">
+        <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="${R}" class="ring-bg"/><circle cx="32" cy="32" r="${R}" class="ring-fg" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct / 100)}"/></svg>
+        <div class="ring-num"><small>LV</small>${game.level}</div>
+      </div>
+      <div class="grow">
+        <div class="lvl-title">${esc(game.title)}</div>
+        <div class="muted small num">${game.into} / ${game.need} XP</div>
+        ${atRisk ? `<div class="small danger-text">${game.into} XP above a level drop</div>` : `<div class="muted small">${game.need - game.into} XP to level ${game.level + 1}</div>`}
+      </div>
+      <div class="streak${game.streak ? " on" : ""}">
+        <svg viewBox="0 0 24 24" class="flame"><path d="M12 2c1 3.5 4.5 5.6 4.5 10a4.5 4.5 0 0 1-9 0c0-2 .8-3.3 1.8-4.5.2 1.7 1 2.7 2.2 3.2C11 8 11 5 12 2z"/></svg>
+        <b>${game.streak}</b><span class="muted small">streak</span>
+      </div>
+    </div>`;
+
+  // Banners (only on today's view)
+  const banners = [];
+  const h = new Date().getHours();
+  const td = game.today || { meals: 0, tot: { kcal: 0, p: 0 }, junk: 0, logged: false };
+  if (curDate === today) {
+    const y = game.yesterday;
+    if (y && !y.logged && y.date >= game.firstDay && !td.logged)
+      banners.push(["bad", `Nothing logged yesterday: <b>${XP.missed} XP</b> and your streak reset. Log breakfast to start a new one.`]);
+    else if (y && y.closed && y.xp < 0 && !td.logged)
+      banners.push(["bad", `Yesterday cost you <b>${y.xp} XP</b>. Today's the comeback: ${XP.protein + XP.calOnTarget + XP.meal * 3}+ XP on the table.`]);
+    if (h >= 18 && td.meals < 2 && game.streak > 0)
+      banners.push(["warn", `Your ${game.streak}-day streak ends at midnight. Log at least 2 main meals to keep it.`]);
+    if (td.tot.kcal > T.kcal * 1.05)
+      banners.push(["bad", `${r0(td.tot.kcal - T.kcal)} kcal over today's target (${td.tot.kcal > T.kcal * 1.15 ? XP.overBig : XP.overSmall} XP). Stop here: anything else today makes it worse.`]);
+    else if (h >= 20 && td.logged && td.tot.p < T.p * 0.85)
+      banners.push(["warn", `${r0(T.p - td.tot.p)}g protein to go. A shake or some chicken gets you the +${XP.protein} XP.`]);
+  }
+  $("#banners").innerHTML = banners.map(([k, t]) => `<div class="banner ${k}">${t}</div>`).join("");
+
+  // Quests (today) or day score (past days)
+  if (curDate === today) {
+    const qs = questsFor(game, T);
+    const allPossible = qs.every((q) => !q.failed);
+    $("#quests").innerHTML = `
+      <div class="meal-head"><h2>Today's quests</h2><span class="muted">${xpStr(td.xp || 0)} XP so far</span></div>
+      ${qs.map((q) => `<div class="quest${q.done ? " done" : ""}${q.failed ? " failed" : ""}">
+        <span class="q-icon">${q.done ? "✓" : q.failed ? "✕" : ""}</span>
+        <span class="grow">${esc(q.label)}${q.progress ? ` <span class="muted small">· ${esc(q.progress)}</span>` : ""}</span>
+        <span class="q-xp">+${q.xp}</span></div>`).join("")}
+      <div class="muted small" style="margin-top:6px">${allPossible ? `Clear them all for a Perfect Day: +${XP.perfect} bonus. Calorie & junk-free XP lands at midnight.` : `Perfect Day is gone for today, but every other quest still counts.`}</div>`;
+  } else {
+    const d = game.days.get(curDate);
+    $("#quests").innerHTML = d
+      ? `<div class="meal-head"><h2>Day score</h2><span class="${d.xp >= 0 ? "good-text" : "danger-text"}"><b>${xpStr(d.xp)} XP</b></span></div>
+         ${d.items.map(([x, l]) => `<div class="quest"><span class="grow">${esc(l)}</span><span class="${x >= 0 ? "good-text" : "danger-text"}">${xpStr(x)}</span></div>`).join("")}
+         ${d.warn.map((w) => `<div class="banner warn" style="margin-top:8px">${esc(w)}</div>`).join("")}`
+      : `<div class="muted small">Before you started logging, so no score.</div>`;
+  }
+  checkProgressEvents();
+}
+
+// Level-up / level-down / new badge pop-ups. Remembers what this device has already shown.
+const SEEN_KEY = "mt-game-seen-v1";
+function checkProgressEvents() {
+  let seen = null;
+  try { seen = JSON.parse(localStorage.getItem(SEEN_KEY)); } catch {}
+  const earned = game.badges.filter((b) => b.earned).map((b) => b.id);
+  const store = () => { try { localStorage.setItem(SEEN_KEY, JSON.stringify({ level: game.level, badges: earned })); } catch {} };
+  if (!seen) { store(); return; }
+  if (game.level > seen.level) {
+    showAlert({ kind: "up", hero: `LV ${game.level}`, title: "Level up", sub: game.title,
+      body: `${game.need - game.into} XP to level ${game.level + 1}. Keep stacking clean days; the streak bonus grows every day (up to +70%).` });
+  } else if (game.level < seen.level) {
+    showAlert({ kind: "down", hero: `LV ${game.level}`, title: "You dropped a level", sub: game.title,
+      body: `Junk, overeating and skipped days cost XP. Win it back today: hit protein (+${XP.protein}) and land your calories (+${XP.calOnTarget}).` });
+  }
+  for (const id of earned.filter((x) => !seen.badges.includes(x))) {
+    const b = game.badges.find((x) => x.id === id);
+    showAlert({ kind: "badge", hero: b.icon, title: "Badge unlocked", sub: b.name, body: b.desc });
+  }
+  store();
+}
+
+// Simple queue so pop-ups show one after another.
+const alertQueue = [];
+function showAlert(a) {
+  alertQueue.push(a);
+  if (!$("#alertSheet").open) nextAlert();
+}
+function nextAlert() {
+  const a = alertQueue.shift();
+  if (!a) return;
+  $("#alertSheet").className = `sheet alert ${a.kind || ""}`;
+  $("#alertBody").innerHTML = `
+    <div class="alert-hero">${esc(a.hero)}</div>
+    <div class="alert-title">${esc(a.title)}</div>
+    ${a.sub ? `<div class="alert-sub">${esc(a.sub)}</div>` : ""}
+    ${a.body ? `<div class="alert-text">${a.html ? a.body : esc(a.body)}</div>` : ""}`;
+  const btns = a.buttons || [{ label: "Let's go", primary: true }];
+  $("#alertButtons").innerHTML = btns.map((b, i) => `<button class="btn ${b.primary ? "primary" : ""}" data-alert-btn="${i}">${esc(b.label)}</button>`).join("");
+  $("#alertButtons").onclick = (e) => {
+    const i = e.target.closest("[data-alert-btn]")?.dataset.alertBtn;
+    if (i == null) return;
+    $("#alertSheet").close();
+    btns[+i].onClick?.();
+  };
+  $("#alertSheet").showModal();
+  if (a.kind === "junk" || a.kind === "down") navigator.vibrate?.([80, 60, 80]);
+}
+
+// Shown right after junk is logged for today.
+function junkAlert(addedIds) {
+  const today = localDate();
+  const added = addedIds.map((id) => db.entries[id]).filter(Boolean);
+  const junk = added.filter((e) => e.junk);
+  if (!junk.length || added[0].date !== today) return;
+  const T = db.settings.targets;
+  const tot = sum(dayEntries(today));
+  const kcal = junk.reduce((a, e) => a + e.n.kcal, 0);
+  const left = T.kcal - tot.kcal;
+  const lines = [
+    `Junk-free (+${XP.junkFree}) and Perfect Day (+${XP.perfect}) bonuses are gone for today.`,
+    `That's <b>${r0(kcal)} kcal</b>, ${r0((kcal / T.kcal) * 100)}% of your whole day.`,
+    left >= 0 ? `You have <b>${r0(left)} kcal</b> left today. Make it lean protein + veg.` : `You're now <b>${r0(-left)} kcal over</b> target.`,
+  ];
+  showAlert({
+    kind: "junk", hero: `${XP.junk * Math.min(junk.length, 3)} XP`, title: "Junk food logged", sub: junk.map((e) => e.name).join(", "), html: true,
+    body: lines.map((l) => `<p>${l}</p>`).join(""),
+    buttons: [
+      { label: "Undo, I won't eat it", onClick: () => { for (const e of junk) remove("entries", e.id); render(); toast("Removed. Good call."); } },
+      { label: "Own it", primary: true },
+    ],
+  });
 }
 
 // ---------- dialogs ----------
@@ -327,6 +484,7 @@ function openAmount(food, opts = {}) {
   $("#amtDelete").hidden = !entry;
   $("#amtEditFood").hidden = !!food.generic || (entry && !entry.foodId);
   $("#amtSave").textContent = entry ? "Save" : "Add";
+  $("#amtJunk").checked = entry ? !!entry.junk : autoJunk(food);
   updateAmtPreview();
   openSheet("#amountSheet");
   setTimeout(() => { const g = $("#amtGrams"); g.focus(); g.select(); }, 50);
@@ -353,28 +511,57 @@ function saveAmount() {
   const grams = num($("#amtGrams").value);
   if (!grams || grams <= 0) { toast("Enter an amount"); return; }
   const meal = $("#amtMeal").value;
+  const junk = $("#amtJunk").checked;
   const { food, entryId } = amt;
+  const before = sum(dayEntries(localDate())).kcal;
+  let newId = null;
   if (entryId) {
     const e = db.entries[entryId];
     const per100 = e.per100 || food.per100;
-    upsert("entries", { ...e, grams, meal, date: $("#amtDate").value || e.date, per100, n: scale(per100, grams) });
+    upsert("entries", { ...e, grams, meal, junk, date: $("#amtDate").value || e.date, per100, n: scale(per100, grams) });
     toast("Updated");
   } else {
-    const f = ensureInLibrary(food);
+    let f = ensureInLibrary(food);
+    if (junk !== autoJunk(f)) { f = { ...f, junk }; upsert("foods", f); } // remember your call for this food
+    newId = uid();
     upsert("entries", {
-      id: uid(), date: curDate, meal, name: f.brand ? `${f.name} (${f.brand})` : f.name,
+      id: newId, date: curDate, meal, junk, name: f.brand ? `${f.name} (${f.brand})` : f.name,
       foodId: f.id, grams, per100: { ...f.per100 }, n: scale(f.per100, grams), createdAt: Date.now(),
     });
-    toast(`Added to ${MEALS.find((m) => m[0] === meal)[1]}`);
+    if (!junk) toast(`Added to ${MEALS.find((m) => m[0] === meal)[1]}`);
   }
   closeSheet("#amountSheet");
   closeSheet("#addSheet");
+  if (newId) afterAdd([newId], before);
   render();
+}
+// Junk alert, or "you just went over" alert, after logging something for today.
+function afterAdd(ids, beforeKcal) {
+  const today = localDate();
+  const added = ids.map((id) => db.entries[id]).filter((e) => e && e.date === today);
+  if (!added.length) return;
+  if (added.some((e) => e.junk)) return junkAlert(ids);
+  const T = db.settings.targets, high = T.kcal * 1.05;
+  const now = sum(dayEntries(today)).kcal;
+  if (beforeKcal <= high && now > high) {
+    showAlert({
+      kind: "junk", hero: `+${r0(now - T.kcal)}`, title: "Over today's target", sub: `${r0(now)} of ${T.kcal} kcal`,
+      body: `That's ${now > T.kcal * 1.15 ? XP.overBig : XP.overSmall} XP. Close the kitchen for today: every extra bite makes it worse.`,
+      buttons: [
+        { label: "Undo", onClick: () => { for (const e of added) remove("entries", e.id); render(); } },
+        { label: "Got it", primary: true },
+      ],
+    });
+  }
 }
 
 // ---------- food editor ----------
 let foodEdit = null; // { food (existing or draft), then: 'amount' | null }
 let basis = "100";
+let fJunkTouched = false;
+function syncEditorJunk() {
+  if (!fJunkTouched) $("#fJunk").checked = isJunkName(`${$("#fName").value} ${$("#fBrand").value}`) || foodEdit?.food?.nutriscore === "e";
+}
 function setBasis(b) {
   basis = b;
   for (const btn of $("#fBasis").children) btn.classList.toggle("on", btn.dataset.basis === b);
@@ -394,6 +581,8 @@ function openFoodEditor(draft = {}, opts = {}) {
   $("#fC").value = p.c != null ? r1(p.c) : "";
   $("#fF").value = p.f != null ? r1(p.f) : "";
   $("#fNa").value = p.na != null ? r0(p.na) : "";
+  $("#fJunk").checked = autoJunk(draft);
+  fJunkTouched = draft.junk === true || draft.junk === false;
   $("#foodDelete").hidden = !(draft.id && db.foods[draft.id]);
   openSheet("#foodSheet");
 }
@@ -419,6 +608,7 @@ function saveFood() {
     barcode: $("#fBarcode").value.trim(),
     per100,
     serving: servG ? { label: $("#fServLabel").value.trim() || "serving", grams: servG } : null,
+    junk: fJunkTouched ? $("#fJunk").checked : undefined, // undefined = decide automatically
     createdAt: prev?.createdAt || Date.now(),
     lastUsed: Date.now(),
   };
@@ -431,7 +621,7 @@ function saveFood() {
 }
 
 // ---------- Open Food Facts ----------
-const OFF_FIELDS = "code,product_name,product_name_en,brands,nutriments,serving_size,serving_quantity";
+const OFF_FIELDS = "code,product_name,product_name_en,brands,nutriments,serving_size,serving_quantity,nutriscore_grade";
 function offToFood(p, code) {
   const n = p.nutriments || {};
   const get = (k) => num(n[k]);
@@ -463,6 +653,7 @@ function offToFood(p, code) {
     serving: sq ? { label: p.serving_size || "serving", grams: sq } : null,
     source: "openfoodfacts",
     incomplete,
+    nutriscore: p.nutriscore_grade || null,
   };
 }
 async function offProduct(code) {
@@ -610,11 +801,11 @@ function buildPrompt(mode, note) {
   if (mode === "label") {
     return `Read the nutrition label / packaging in the attached photo for my macro tracker.
 ${note ? `Extra info: ${note}\n` : ""}
-Give values PER 100 g (or per 100 ml for drinks). If the label only shows per-serving values, convert using the serving size. If no label is visible, use your best knowledge of this exact product and say so in "note". Use 0 for anything genuinely unknown.
+Give values PER 100 g (or per 100 ml for drinks). If the label only shows per-serving values, convert using the serving size. Set "junk" true if this is junk food (sweets, crisps, sugary drink, pastry, fast food, alcohol). If no label is visible, use your best knowledge of this exact product and say so in "note". Use 0 for anything genuinely unknown.
 
 Reply with ONLY this JSON in a code block, filled in, nothing else:
 \`\`\`json
-{"type":"label","name":"","brand":"","serving_label":"","serving_grams":0,"kcal":0,"protein_g":0,"carbs_g":0,"fat_g":0,"sodium_mg":0,"note":""}
+{"type":"label","name":"","brand":"","serving_label":"","serving_grams":0,"kcal":0,"protein_g":0,"carbs_g":0,"fat_g":0,"sodium_mg":0,"junk":false,"note":""}
 \`\`\``;
   }
   return `Estimate the nutrition of my meal for my macro tracker (photo attached; if there's no photo, go by my description).
@@ -622,11 +813,12 @@ What I ate / weights I know: ${note || "(nothing extra, judge from the photo)"}
 
 ${RULES}
 - List each component as its own item, including oils, sauces, seasonings and toppings. Don't drop small items.
+- "junk" is true for fast food/takeaway, deep-fried food, sweets, pastries, crisps, sugary drinks and alcohol; false for normal home-cooked or whole foods. Be honest: I am cutting.
 - "basis" is "given" if I stated the amount, otherwise "estimated". Keep "note" short, e.g. "2 medium boneless thighs ≈ 220g".
 
 Reply with ONLY this JSON in a code block, filled in, nothing else:
 \`\`\`json
-{"type":"meal","summary":"","items":[{"name":"","grams":0,"kcal":0,"protein_g":0,"carbs_g":0,"fat_g":0,"sodium_mg":0,"basis":"estimated","note":""}]}
+{"type":"meal","summary":"","items":[{"name":"","grams":0,"kcal":0,"protein_g":0,"carbs_g":0,"fat_g":0,"sodium_mg":0,"basis":"estimated","junk":false,"note":""}]}
 \`\`\``;
 }
 
@@ -717,7 +909,7 @@ function readReply() {
     const sg = nn(out.serving_grams);
     const draft = {
       ...(aiTarget === "food-editor" ? currentEditorDraft() : {}),
-      name: out.name || "", brand: out.brand || "", per100,
+      name: out.name || "", brand: out.brand || "", per100, junk: out.junk === true || isJunkName(out.name) || undefined,
       serving: sg > 0 ? { label: out.serving_label || "serving", grams: sg } : null,
     };
     if (!draft.barcode && lastBarcode && aiTarget === "barcode") draft.barcode = lastBarcode;
@@ -729,7 +921,7 @@ function readReply() {
   aiItems = out.items.filter((it) => it && it.name).map((it) => {
     const g = nn(it.grams) || 100;
     return {
-      use: true, name: String(it.name), grams: g, basis: it.basis === "given" ? "given" : "estimated", note: it.note || "",
+      use: true, junk: it.junk === true || isJunkName(it.name), name: String(it.name), grams: g, basis: it.basis === "given" ? "given" : "estimated", note: it.note || "",
       per100: { kcal: (nn(it.kcal) * 100) / g, p: (nn(it.protein_g) * 100) / g, c: (nn(it.carbs_g) * 100) / g, f: (nn(it.fat_g) * 100) / g, na: (nn(it.sodium_mg) * 100) / g },
     };
   });
@@ -743,7 +935,7 @@ function renderAiItems(summary) {
     <table class="ai-table">${aiItems.map((it, i) => {
       const n = scale(it.per100, it.grams);
       return `<tr><td><input type="checkbox" data-ai-use="${i}" ${it.use ? "checked" : ""}></td>
-        <td><div class="nm">${esc(it.name)}</div><div class="nt">${r0(n.kcal)} kcal · P ${r1(n.p)} · C ${r1(n.c)} · F ${r1(n.f)}${it.basis === "estimated" ? " · est." : ""}${it.note ? " · " + esc(it.note) : ""}</div></td>
+        <td><div class="nm">${esc(it.name)} <button class="junk-tag${it.junk ? " on" : ""}" data-ai-junk="${i}">${it.junk ? "junk" : "mark junk"}</button></div><div class="nt">${r0(n.kcal)} kcal · P ${r1(n.p)} · C ${r1(n.c)} · F ${r1(n.f)}${it.basis === "estimated" ? " · est." : ""}${it.note ? " · " + esc(it.note) : ""}</div></td>
         <td><input type="number" inputmode="decimal" step="any" data-ai-g="${i}" value="${r1(it.grams)}"> g</td></tr>`;
     }).join("")}</table>
     <div class="macro-preview" style="margin-top:12px">${previewHtml(tot)}</div>
@@ -757,16 +949,20 @@ function addAiItems() {
   const chosen = aiItems.filter((i) => i.use && i.grams > 0);
   if (!chosen.length) { toast("Nothing selected"); return; }
   const now = Date.now();
+  const before = sum(dayEntries(localDate())).kcal;
+  const ids = [];
   chosen.forEach((it, k) => {
     const rec = {
-      id: uid() + k, date: curDate, meal, name: it.name, grams: it.grams, per100: it.per100,
+      id: uid() + k, date: curDate, meal, junk: !!it.junk, name: it.name, grams: it.grams, per100: it.per100,
       n: scale(it.per100, it.grams), estimated: it.basis === "estimated", createdAt: now + k, updatedAt: now,
     };
     db.entries[rec.id] = rec;
+    ids.push(rec.id);
   });
   save();
   closeSheet("#aiSheet");
   closeSheet("#addSheet");
+  afterAdd(ids, before);
   render();
   toast(`Added ${chosen.length} item${chosen.length > 1 ? "s" : ""}`);
 }
@@ -774,20 +970,68 @@ function currentEditorDraft() {
   return { id: foodEdit?.food?.id, barcode: $("#fBarcode").value.trim(), name: $("#fName").value.trim(), brand: $("#fBrand").value.trim() };
 }
 
-// ---------- history ----------
-function renderHistory() {
+// ---------- progress (level, weight, coach, badges, XP history) ----------
+function renderProgress() {
+  const g = game || computeGame(db, localDate());
+  const w = g.weight;
+  const today = localDate();
+  const todayW = live("weights").find((x) => x.date === today);
+  const goal = db.settings.goalKg;
+  const f1 = (x) => (x == null ? "–" : x.toFixed(1));
+
   const rows = [];
   for (let i = 0; i < 14; i++) {
-    const d = addDays(localDate(), -i);
-    const t = sum(dayEntries(d));
-    rows.push(`<tr class="click" data-day="${d}"><td>${prettyDate(d)}</td><td>${r0(t.kcal)}</td><td>${r0(t.p)}</td><td>${r0(t.c)}</td><td>${r0(t.f)}</td></tr>`);
+    const d = addDays(today, -i);
+    const info = g.days.get(d);
+    const t = info?.tot || { kcal: 0, p: 0 };
+    const x = info ? info.xp : null;
+    rows.push(`<tr class="click" data-day="${d}"><td>${prettyDate(d)}${info?.perfect ? ' <span class="pill gold">perfect</span>' : ""}${info?.junk ? ' <span class="pill bad">junk</span>' : ""}</td>
+      <td>${info?.logged ? r0(t.kcal) : "–"}</td><td>${info?.logged ? r0(t.p) : "–"}</td>
+      <td class="${x == null ? "" : x >= 0 ? "good-text" : "danger-text"}">${x == null ? "" : xpStr(x)}</td></tr>`);
   }
-  const logged = [];
-  for (let i = 1; i <= 7; i++) { const t = sum(dayEntries(addDays(localDate(), -i))); if (t.kcal > 0) logged.push(t); }
-  const avg = (k) => (logged.length ? r0(logged.reduce((a, t) => a + t[k], 0) / logged.length) : "–");
-  $("#historyBody").innerHTML = `
-    <p class="muted small">Last 7 days average (days with food logged): <b>${avg("kcal")} kcal</b> · P ${avg("p")}g · C ${avg("c")}g · F ${avg("f")}g</p>
-    <table class="hist"><tr><th>Day</th><th>kcal</th><th>P</th><th>C</th><th>F</th></tr>${rows.join("")}</table>`;
+
+  $("#progressBody").innerHTML = `
+    <div class="stat-grid">
+      <div class="stat"><b>${g.level}</b><span>Level · ${esc(g.title)}</span></div>
+      <div class="stat"><b>${g.totalXP}</b><span>Total XP</span></div>
+      <div class="stat"><b>${g.streak}</b><span>Streak · best ${g.bestStreak}</span></div>
+    </div>
+
+    <h3>Weight</h3>
+    <div class="row tight">
+      <input id="wInput" type="number" inputmode="decimal" step="0.1" placeholder="Today's weight (kg)" value="${todayW ? todayW.kg : ""}" class="grow">
+      <button class="btn primary" id="wSave">${todayW ? "Update" : `Weigh in +${XP.weighIn}`}</button>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><b>${f1(w.avgNow)}</b><span>7-day avg kg</span></div>
+      <div class="stat"><b class="${w.ratePerWeek > 0 ? "good-text" : ""}">${w.ratePerWeek == null ? "–" : (w.ratePerWeek >= 0 ? "−" : "+") + Math.abs(w.ratePerWeek).toFixed(2)}</b><span>kg / week</span></div>
+      <div class="stat"><b>${w.count ? (w.lost >= 0 ? "−" : "+") + Math.abs(w.lost).toFixed(1) : "–"}</b><span>${goal ? `kg total · goal ${goal}` : "kg total"}</span></div>
+    </div>
+    ${g.coach.length ? `<div class="coach">${g.coach.map((c) => `<p>${esc(c)}</p>`).join("")}</div>` : ""}
+
+    <h3>Badges <span class="muted small">${g.badges.filter((b) => b.earned).length}/${g.badges.length}</span></h3>
+    <div class="badges">${g.badges.map((b) => `<div class="badge${b.earned ? " earned" : ""}" title="${esc(b.desc)}">
+      <div class="badge-mark">${esc(b.icon)}</div><div class="badge-name">${esc(b.name)}</div>
+      <div class="badge-desc">${b.earned ? "Unlocked" : b.progress ? `${b.progress[0]}/${b.progress[1]}` : esc(b.desc)}</div></div>`).join("")}</div>
+
+    <h3>Last 14 days</h3>
+    <table class="hist"><tr><th>Day</th><th>kcal</th><th>P</th><th>XP</th></tr>${rows.join("")}</table>
+
+    <h3>How XP works</h3>
+    <div class="muted small rules">
+      <p>+${XP.meal} per main meal logged · +${XP.protein} protein hit · +${XP.calOnTarget} calories on target · +${XP.junkFree} junk-free · +${XP.weighIn} weigh-in · +${XP.perfect} perfect day</p>
+      <p>Streak bonus: +5% per day in a row, up to +70%.</p>
+      <p class="danger-text">${XP.junk} per junk item · ${XP.overSmall} / ${XP.overBig} for going over · ${XP.missed} for a day with nothing logged. XP can fall, and so can your level.</p>
+    </div>`;
+}
+function saveWeight() {
+  const kg = num($("#wInput").value);
+  if (!kg || kg < 25 || kg > 400) { toast("Enter your weight in kg"); return; }
+  const today = localDate();
+  upsert("weights", { id: today, date: today, kg });
+  render();
+  renderProgress();
+  toast("Weighed in");
 }
 
 // ---------- settings ----------
@@ -796,11 +1040,13 @@ function openSettings() {
   $("#tKcal").value = t.kcal ?? ""; $("#tP").value = t.p ?? ""; $("#tC").value = t.c ?? ""; $("#tF").value = t.f ?? ""; $("#tNa").value = t.na ?? "";
   $("#sOwner").value = s.ghOwner || ""; $("#sRepo").value = s.ghRepo || ""; $("#sToken").value = s.ghToken || "";
   $("#syncInfo").textContent = syncConfigured() ? lastSyncMsg : "Not set up";
+  $("#tMaint").value = db.settings.maintenance ?? ""; $("#tGoal").value = db.settings.goalKg ?? "";
   openSheet("#settingsSheet");
 }
 function saveSettings() {
   db.settings = {
     targets: { kcal: num($("#tKcal").value) || 0, p: num($("#tP").value) || 0, c: num($("#tC").value) || 0, f: num($("#tF").value) || 0, na: num($("#tNa").value) || 0 },
+    maintenance: num($("#tMaint").value) || null, goalKg: num($("#tGoal").value) || null,
     updatedAt: Date.now(),
   };
   const before = JSON.stringify(secrets());
@@ -841,11 +1087,16 @@ $("#nextDay").onclick = () => { curDate = addDays(curDate, 1); render(); };
 $("#dateLabel").onclick = () => { curDate = localDate(); render(); };
 $("#fab").onclick = () => openAdd(curDate === localDate() ? guessMeal() : "snacks");
 $("#openSettings").onclick = openSettings;
-$("#openHistory").onclick = () => { renderHistory(); openSheet("#historySheet"); };
-$("#historyBody").onclick = (e) => {
+const openProgress = () => { renderProgress(); openSheet("#progressSheet"); };
+$("#openHistory").onclick = openProgress;
+$("#gameCard").onclick = openProgress;
+$("#progressBody").onclick = (e) => {
+  if (e.target.id === "wSave") return saveWeight();
   const tr = e.target.closest("[data-day]");
-  if (tr) { curDate = tr.dataset.day; render(); closeSheet("#historySheet"); }
+  if (tr) { curDate = tr.dataset.day; render(); closeSheet("#progressSheet"); }
 };
+$("#progressBody").addEventListener("keydown", (e) => { if (e.target.id === "wInput" && e.key === "Enter") saveWeight(); });
+$("#alertSheet").addEventListener("close", () => setTimeout(nextAlert, 150));
 $("#meals").onclick = (e) => {
   const add = e.target.closest("[data-add]");
   if (add) return openAdd(add.dataset.add);
@@ -887,6 +1138,9 @@ $("#amtEditFood").onclick = () => openFoodEditor(amt.food, { then: amt.entryId ?
 
 $("#fBasis").onclick = (e) => { const b = e.target.closest("[data-basis]"); if (b) setBasis(b.dataset.basis); };
 $("#foodSave").onclick = saveFood;
+$("#fName").addEventListener("input", syncEditorJunk);
+$("#fBrand").addEventListener("input", syncEditorJunk);
+$("#fJunk").addEventListener("change", () => { fJunkTouched = true; });
 $("#foodDelete").onclick = () => {
   if (!confirm("Delete this food from your library? Logged entries stay.")) return;
   remove("foods", foodEdit.food.id); closeSheet("#foodSheet"); closeSheet("#amountSheet"); renderSearch(); toast("Food deleted");
@@ -912,7 +1166,16 @@ $("#aiResults").addEventListener("change", (e) => {
   const u = e.target.dataset.aiUse;
   if (u != null) { aiItems[+u].use = e.target.checked; refreshAiRow(); }
 });
-$("#aiResults").addEventListener("click", (e) => { if (e.target.id === "aiAdd") addAiItems(); });
+$("#aiResults").addEventListener("click", (e) => {
+  if (e.target.id === "aiAdd") return addAiItems();
+  const j = e.target.closest("[data-ai-junk]");
+  if (j) {
+    const it = aiItems[+j.dataset.aiJunk];
+    it.junk = !it.junk;
+    j.classList.toggle("on", it.junk);
+    j.textContent = it.junk ? "junk" : "mark junk";
+  }
+});
 function refreshAiRow() {
   // Update the per-row text + totals without rebuilding inputs (keeps focus while typing).
   const rows = $("#aiResults").querySelectorAll(".ai-table tr");
